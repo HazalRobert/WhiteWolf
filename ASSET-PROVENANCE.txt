@@ -1,0 +1,12 @@
+WhiteWolf 1.2.2 visual asset provenance
+
+Bundled mascot: public/themes/whitewolf-mascot.png
+Generated and refined with OpenAI image generation tools during development. The design direction was a broad-faced white wolf with a wink, two large front paws and natural fur texture, on a transparent background. The final edit used an earlier generated mascot and a user-supplied wolf photograph as visual references. The reference photograph and intermediate generations are not distributed in this repository. No assertion is made here about ownership of third-party reference material.
+
+Toolbar mark: public/icons/whitewolf.svg
+A project-authored vector mark, using a filled blue tile, white wolf silhouette and simplified small-size facial details. scripts/whitewolf-icons.mjs rasterizes it into Chrome PNG icons at 16, 20, 24, 32, 48 and 128 pixels. The in-page decorative vector is in src/ThemeArtwork.tsx. These icon resources were introduced in 1.2.1 and retained in 1.2.2.
+
+Local custom themes
+User-selected theme images are not bundled. Image resizing, compression and crop suggestions occur in the user's browser without an image-generation service. This runtime feature is separate from development-time mascot creation.
+
+The repository's project license is in LICENSE. Third-party software license texts are retained separately in THIRD_PARTY_NOTICES.txt.

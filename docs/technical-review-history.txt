@@ -1,0 +1,52 @@
+Reciprocal · X 1.1.6 — GitHub 技术核对与修复说明
+日期：2026-10-18
+
+一、确认的原始错误及原因
+用户提供的最初错误为 SCHEMA: Missing pagination cursor。代码中该错误由控制器的分页结果校验产生。
+旧版解析器允许非空、无空白和控制字符、最长 4096 的不透明游标；控制器及下一页请求入口却另外限制为 Base64 风格字符、最长 2048。两个合同不一致。
+公开真实 Following 响应的 Bottom 游标为 1771337970390780275|2085474368099450818。竖线被旧规则拒绝；因此“Missing”并不意味着服务端缺失这个字段。
+新版将控制器与请求入口改为同一校验函数，并通过测试确认它与可序列化解析器的合同相同。不拆分、不解码、不裁剪、不改写游标；下一页仍通过 JSON 和 URLSearchParams 编码传递。
+我们未读取用户当次具体游标，不能声称拿到了用户的原始响应。证据是相同错误路径、独立公开响应、修复前后完整浏览器回归。
+
+公开样本：
+https://github.com/vladkens/twscrape/blob/568844df82af956df5970bcf7ff84dd5ba729eb0/tests/mocked-data/raw_following.json
+样本 SHA256：2361abb30e10b81472b5b820d36883791d4700bfc915b3f40088ded3f6a50e22
+许可证：MIT
+https://github.com/vladkens/twscrape/blob/568844df82af956df5970bcf7ff84dd5ba729eb0/LICENSE
+说明：该原始样本同时带 Bottom termination。两页回归采用其中的精确游标值构造非终止页；没有将构造场景说成原始两页抓包。
+
+二、阅读的扩展实现与取舍
+1. Chromuhlink/unfollow-suite，提交 c4cccc8dde8c112ed820bf5acaa7d44ca26c695a，MIT。
+https://github.com/Chromuhlink/unfollow-suite/blob/c4cccc8dde8c112ed820bf5acaa7d44ca26c695a/dist/x-unfollow-suite.js#L690-L759
+实际路线：GraphQL Following/Followers 分页与集合差分。
+本次采用：游标作为不透明字符串原样传递，检测已经出现过的游标。
+未采用：无边界递归搜任意用户、缺少 Bottom 时取其他游标、重复游标或空页停滞后仍标完整。用于取关的候选集合必须有明确来源与完成状态。
+
+2. Lemelson/xporter-extension，提交 99a69b99688cf49dd697eaf356d3e2dde7456776，MIT + Commons Clause。
+https://github.com/Lemelson/xporter-extension/blob/99a69b99688cf49dd697eaf356d3e2dde7456776/background/service-worker.js#L1982-L2001
+https://github.com/Lemelson/xporter-extension/blob/99a69b99688cf49dd697eaf356d3e2dde7456776/LICENSE
+实际路线：该固定版本 Following 为 REST，另有通用 GraphQL 用户解析和可恢复导出任务。
+本次参考：保活必须具有开始/停止边界；失去执行者的任务不能继续显示正常运行。
+本次实现：已连接控制页每20秒通过原Port发送本次boot/session心跳；后台只核对租约并回应，不请求X。当前源码通过Port租约心跳实现该边界，没有使用该项目的getPlatformInfo保活路线；此处说明实现选择，不将静态核对扩大为对整个开发历史的法律鉴定。
+未移植：持久扫描恢复/自动续跑、宽松递归搜用户、静默跳过未知用户。它们超出本次修复范围，且不能直接证明取关扫描完整。
+
+3. kysoog/x-unfollowers，提交 35f8a6fe6b05686b0519f97ad220337f9ab09e25，MIT。
+https://github.com/kysoog/x-unfollowers/blob/35f8a6fe6b05686b0519f97ad220337f9ab09e25/background.js#L119-L155
+https://github.com/kysoog/x-unfollowers/blob/35f8a6fe6b05686b0519f97ad220337f9ab09e25/background.js#L352-L366
+实际路线：REST friends/list 与 friendships/lookup；有持久队列及恢复。
+未采用：缺cursor默认结束；空页即完成；未核实关系字段作为否定值；写入成功后才移除队首导致崩溃后可能重放。当前扩展保留未知关系、未确认写入防重和显式重新连接。
+
+三、官方机制核对与实际修正
+Chrome 文档说明，空闲服务工作线程通常在30秒后结束；Chrome114起打开Port本身不再重置空闲计时器，实际Port消息才会延长其生命周期。
+https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle
+因此新版只在有效控制会话中保持心跳；取消、错误、断线及窗口关闭都清理计时器。后台真正终止时仍停止处理，不自动重连、重发或续跑。
+
+旧版后台遇到SCHEMA停止会话，却让控制Port继续存在。稍后断开事件将原SCHEMA覆盖为WORKER_RESTART。该行为已在联合单元测试及实际隔离MV3后台强制停止测试中复现。
+新版错误回复明确标记会话已结束，界面先关闭连接再呈现原错；后续断开不会覆盖它。页面关闭/重载、权限撤销、会话替换分别带明确信息。无法确认原因的控制断开不再一概宣称后台已经重启。
+
+四、验证范围
+pagination-regression.json：旧版1.1.5同错；新版1.1.6完成两页，游标原样送达第二页，0次关系写入。
+lifecycle-before.json / lifecycle-after.json：原错保留与实际后台停止；新版还经过65秒控制连接空闲观察。
+浏览器自动化可能影响自然休眠。初次65秒旧版观察没有自然复现休眠；后续用CDP仅在独立合成测试浏览器主动停止后台，不能把这说成用户Chrome自然休眠实测。
+browser-report.json：实际MV3后台、页面脚本、解析器与UI的隔离回归；包含十语言布局、手动/自动模式、白名单与模拟关系操作。
+所有X流量均在测试内截获，未访问用户真实账号、未执行真实关注或取关。真实账号重载后的扫描尚未验证。这些是1.1.6历史验证范围说明；历史报告和本机路径未随公开仓库分发。1.2.2的当前构建与测试方法见根目录README.md。

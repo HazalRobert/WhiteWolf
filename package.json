@@ -1,0 +1,39 @@
+{
+  "name": "whitewolf",
+  "version": "1.2.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && node build.mjs",
+    "test": "node test.mjs",
+    "test:browser": "node build.mjs && node scripts/browser-smoke.mjs",
+    "test:design": "node build.mjs && node scripts/design-check.mjs",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "lucide-react": "0.468.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/chrome": "0.0.287",
+    "@types/node": "22.10.2",
+    "typescript": "5.7.3",
+    "vite": "6.4.1",
+    "esbuild": "0.25.12",
+    "playwright": "1.62.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HazalRobert/WhiteWolf.git"
+  },
+  "homepage": "https://github.com/HazalRobert/WhiteWolf",
+  "bugs": {
+    "url": "https://github.com/HazalRobert/WhiteWolf/issues"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
