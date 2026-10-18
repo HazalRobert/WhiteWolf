@@ -20,6 +20,19 @@ Version: **1.2.2**. License: **MIT**. Chrome Web Store submission is being prepa
 
 A scan checkpoint lasts only while the control page remains open. Closing or refreshing it requires a new scan; account changes and session errors also invalidate it. Pausing stops subsequent work but cannot recall a relationship request already sent to X. Resuming automatic processing still requires preview and confirmation. An optional, explicit button follows the author, `@MagicalStocker`; following the author does not unlock functionality.
 
+### Download and install on Windows Chrome
+
+[**Download WhiteWolf 1.2.2 for Windows Chrome (ZIP)**](downloads/WhiteWolf-1.2.2-Windows-Chrome.zip?raw=true). This package is already built; ordinary users do not need Node.js, pnpm or a source build.
+
+1. Extract the ZIP to a permanent folder.
+2. Open `chrome://extensions` in desktop Chrome 120 or later and enable **Developer mode**.
+3. Select **Load unpacked** and choose the extracted folder that directly contains `manifest.json`.
+4. Pin WhiteWolf, sign in to X in the same Chrome profile, then open WhiteWolf, connect the intended X tab and verify the account before scanning.
+
+[Detailed installation instructions / 中文安装说明](downloads/README.md) · [SHA-256 checksum](downloads/SHA256SUMS.txt)
+
+Keep the extracted folder in place. This download provides Windows Chrome installation support; Mac installation and compatibility verification are planned. Existing users of 1.2.2 do not need to reinstall; loading a different directory may create a separate extension identity and storage.
+
 ### Build and load locally
 
 Use Node.js 24 and pnpm 11.25.0. The repository pins dependency versions with `pnpm-lock.yaml` and the package-manager version in `package.json`.
@@ -89,6 +102,19 @@ WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上�
 - 支持中文、英语、法语、西班牙语、俄语、德语、葡萄牙语、日语、韩语、阿拉伯语及阿拉伯语从右向左布局。
 
 扫描断点仅保留在当前控制页面内存中；关闭、刷新页面后需要重新扫描，切换账号或发生会话错误也会使断点失效。暂停会停止后续工作，但不能撤回已经发送给 X 的关注或取消关注请求。恢复自动处理仍需预览和确认。关注作者 `@MagicalStocker` 是独立、自愿的点击操作，不作为任何功能的解锁条件。
+
+### Windows Chrome 直接下载安装
+
+[**下载 WhiteWolf 1.2.2 Windows Chrome 安装包（ZIP）**](downloads/WhiteWolf-1.2.2-Windows-Chrome.zip?raw=true)。已构建完成，无需安装 Node.js 或自行编译。
+
+1. 将 ZIP 完整解压到固定文件夹。
+2. 在桌面 Chrome 120 或更新版本打开 `chrome://extensions`，开启“开发者模式”。
+3. 点击“加载已解压的扩展程序”，选择直接包含 `manifest.json` 的解压文件夹。
+4. 固定 WhiteWolf 图标，在同一浏览器配置登录 X；打开 WhiteWolf，连接对应标签页并核对账号后扫描。
+
+[详细中文安装说明](downloads/README.md) · [SHA-256 校验值](downloads/SHA256SUMS.txt)
+
+安装后保留该文件夹。当前提供 Windows Chrome 安装支持；Mac 安装与适配验证会尽快补上。已经安装 1.2.2 无需重复安装；换目录加载可能产生新的扩展身份及独立存储。
 
 ### 本地构建与安装
 
