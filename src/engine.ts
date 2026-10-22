@@ -3,6 +3,7 @@ import { emptySaved, type Repository, type Saved } from './storage';
 import { isValidCursor } from './cursor';
 
 export const isCandidate = (row: Row) => row.relation.following === true && row.relation.followedBy === false && row.outcome === 'pending';
+export const isAutoReady = (state: Pick<AppState,'complete'|'autoReady'>) => state.autoReady ?? state.complete;
 export const isWhitelisted = (row: Pick<Row,'id'|'handle'>, list: WhiteEntry[]) => list.some(e => e.id ? e.id===row.id : e.handle.toLowerCase()===row.handle.toLowerCase());
 export const csvCell=(value:unknown)=>{
   let text=String(value??'');
@@ -40,7 +41,7 @@ export class Controller implements Actions {
   private sessionLoss: string | null = null;
   private scanCheckpoint: ScanCheckpoint | null = null;
   constructor(private adapter:Adapter,private repository:Repository, demo=false,private readDelay=900) {
-    this.state={demo,connected:false,account:null,rows:[],phase:'idle',complete:false,scannedAt:null,pages:0,checked:0,unavailableCount:0,whitelist:[],settings:{...this.saved.settings},error:null,message:demo?'statusDemo':'statusIdle',currentId:null,logs:[],authorFollowed:false,activeOperation:null,pausePending:false,canResumeScan:false};
+    this.state={demo,connected:false,account:null,rows:[],phase:'idle',complete:false,autoReady:false,scannedAt:null,pages:0,checked:0,unavailableCount:0,whitelist:[],settings:{...this.saved.settings},error:null,message:demo?'statusDemo':'statusIdle',currentId:null,logs:[],authorFollowed:false,activeOperation:null,pausePending:false,canResumeScan:false};
     adapter.setSessionLostListener?.(message=>{
       this.sessionLoss=message;this.stopped=true;this.scanCheckpoint=null;this.wake?.();
       // A transport closure after an already reported terminal error is secondary.
@@ -80,7 +81,7 @@ export class Controller implements Actions {
     this.saved=await this.repository.read();this.assertActive();
     const account=await this.adapter.connect();this.assertActive();
     const changed=previous && previous.id!==account.id;
-    this.patch({connected:true,account,logs:this.saved.logs,whitelist:this.saved.whitelists[account.id]||[],...(changed?{rows:[],complete:false,checked:0,pages:0,unavailableCount:0,scannedAt:null,authorFollowed:false}:{})});
+    this.patch({connected:true,account,logs:this.saved.logs,whitelist:this.saved.whitelists[account.id]||[],...(changed?{rows:[],complete:false,autoReady:false,checked:0,pages:0,unavailableCount:0,scannedAt:null,authorFollowed:false}:{})});
     if(changed){this.scanCheckpoint=null;this.patch({canResumeScan:false});throw new Error('ACCOUNT_CHANGED: Re-scan this account');}
     return account;
   }
@@ -101,7 +102,7 @@ export class Controller implements Actions {
   connect=async()=>this.run(async()=>{this.patch({phase:'connecting'});await this.bind();this.patch({phase:'idle',message:'statusConnected'});});
   scan=async()=>this.run(async()=>{
     this.scanCheckpoint={actorId:null,cursor:'-1',seenCursors:new Set(),ids:new Set(),rows:[],pages:0,unavailableCount:0,followingDone:false,relationOffset:0,pageRelations:new Map(),detachedIds:new Set(),paused:this.stopped};
-    this.patch({phase:'connecting',rows:[],complete:false,scannedAt:null,pages:0,checked:0,unavailableCount:0});
+    this.patch({phase:'connecting',rows:[],complete:false,autoReady:false,scannedAt:null,pages:0,checked:0,unavailableCount:0});
     await this.continueScan();
   },'scan');
   resumeScan=async()=>{
@@ -186,9 +187,9 @@ export class Controller implements Actions {
       if(row.outcome==='uncertain' && row.relation.following===false){row.outcome='unfollowed';await this.audit(row,'unfollow','verified');this.assertActive();}
     }
     this.assertActive();
-    const unknown=rows.some(r=>r.relation.following===null||r.relation.followedBy===null);
+    const unknown=rows.some(r=>typeof r.relation.following!=='boolean'||typeof r.relation.followedBy!=='boolean');
     this.scanCheckpoint=null;
-    this.patch({rows:[...rows],complete:!unknown&&checkpoint.unavailableCount===0,phase:'ready',scannedAt:Date.now(),message:'statusReady',error:unknown?'INCOMPLETE: Some relationships could not be verified':null});
+    this.patch({rows:[...rows],complete:!unknown&&checkpoint.unavailableCount===0,autoReady:!unknown,phase:'ready',scannedAt:Date.now(),message:'statusReady',error:unknown?'INCOMPLETE: Some relationships could not be verified':null});
   }
   pause=()=>{
     if(this.busy&&this.state.activeOperation==='scan'&&this.scanCheckpoint)this.scanCheckpoint.paused=true;
@@ -234,7 +235,7 @@ export class Controller implements Actions {
   }
   unfollow=async(id:string)=>{if(this.scanCheckpoint)return;await this.run(async()=>{await this.bind();this.patch({phase:'running',message:'statusRunning'});await this.perform(id,false);if(!this.stopped)this.patch({phase:'ready'});},'manual');};
   startAuto=async()=>{if(this.scanCheckpoint)return;await this.run(async()=>{
-    if(!this.state.complete)throw new Error('INCOMPLETE: Complete a scan before automatic mode');
+    if(!isAutoReady(this.state))throw new Error('INCOMPLETE: Complete a scan before automatic mode');
     await this.bind();await this.persist();this.assertActive();
     const queue=this.state.rows.filter(r=>isCandidate(r)&&!isWhitelisted(r,this.state.whitelist)).slice(0,this.state.settings.batchLimit).map(r=>r.id);
     this.patch({phase:'running',message:'statusRunning'});
@@ -262,9 +263,9 @@ export class Controller implements Actions {
   removeWhitelist=(handle:string)=>{if(this.busy)return;this.patch({whitelist:this.state.whitelist.filter(e=>e.handle.toLowerCase()!==handle.toLowerCase())});void this.persist().catch(e=>this.patch({error:String(e)}));};
   toggleWhitelist=(id:string)=>{if(this.busy)return;const row=this.state.rows.find(r=>r.id===id);if(!row)return;const exists=isWhitelisted(row,this.state.whitelist);this.patch({whitelist:exists?this.state.whitelist.filter(e=>e.id?e.id!==id:e.handle.toLowerCase()!==row.handle.toLowerCase()):[...this.state.whitelist,{id,handle:row.handle}]});void this.persist().catch(e=>this.patch({error:String(e)}));};
   exportCsv=()=>{
-    const lines=[['id','handle','name','following','followed_by','outcome','whitelisted','scan_complete','scanned_at','unavailable_entries'],...this.state.rows.map(r=>[r.id,r.handle,r.name,r.relation.following,r.relation.followedBy,r.outcome,isWhitelisted(r,this.state.whitelist),this.state.complete,this.state.scannedAt?new Date(this.state.scannedAt).toISOString():'',this.state.unavailableCount??0])];
+    const lines=[['id','handle','name','following','followed_by','outcome','whitelisted','scan_complete','scanned_at','unavailable_entries','auto_ready'],...this.state.rows.map(r=>[r.id,r.handle,r.name,r.relation.following,r.relation.followedBy,r.outcome,isWhitelisted(r,this.state.whitelist),this.state.complete,this.state.scannedAt?new Date(this.state.scannedAt).toISOString():'',this.state.unavailableCount??0,isAutoReady(this.state)])];
     const url=URL.createObjectURL(new Blob(['\uFEFF'+lines.map(r=>r.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));
     const a=document.createElement('a');a.href=url;a.download='whitewolf-scan.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
-  clearLocalData=async()=>{if(this.busy)return;this.adapter.cancel();this.scanCheckpoint=null;await this.saveChain;this.saved=emptySaved();this.patch({settings:{...this.saved.settings},connected:false,account:null,rows:[],complete:false,scannedAt:null,pages:0,checked:0,unavailableCount:0,whitelist:[],logs:[],authorFollowed:false,phase:'idle',error:null,message:'statusDataCleared',activeOperation:null,pausePending:false,canResumeScan:false});if(this.repository.clear)await this.repository.clear(this.saved);else await this.persist();};
+  clearLocalData=async()=>{if(this.busy)return;this.adapter.cancel();this.scanCheckpoint=null;await this.saveChain;this.saved=emptySaved();this.patch({settings:{...this.saved.settings},connected:false,account:null,rows:[],complete:false,autoReady:false,scannedAt:null,pages:0,checked:0,unavailableCount:0,whitelist:[],logs:[],authorFollowed:false,phase:'idle',error:null,message:'statusDataCleared',activeOperation:null,pausePending:false,canResumeScan:false});if(this.repository.clear)await this.repository.clear(this.saved);else await this.persist();};
 }

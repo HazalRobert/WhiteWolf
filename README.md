@@ -6,16 +6,16 @@
 
 WhiteWolf is a free, open-source Chrome extension for reviewing the X accounts you follow and identifying accounts that do not follow you back. It provides manual and automatic unfollow workflows, an account-specific whitelist, and a local activity log.
 
-Version: **1.2.3**. License: **MIT**. Chrome Web Store submission is being prepared; this repository does not claim an approved or published store listing. WhiteWolf is an independent project and is not affiliated with or endorsed by X or Google.
+Version: **1.2.4**. License: **MIT**. Chrome Web Store submission is being prepared; this repository does not claim an approved or published store listing. WhiteWolf is an independent project and is not affiliated with or endorsed by X or Google.
 
-### 1.2.3 scan fix
+### 1.2.4 automatic-processing fix
 
-Explicit unavailable-user placeholders no longer abort Following pagination. Excluded entries are counted separately; automatic processing stays disabled if any are unverified. Verified normal accounts remain available for individual review. See [the changelog and test scope](CHANGELOG.md).
+Automatic processing now remains available after a scan excludes explicit unavailable-user placeholders, once pagination and all remaining account relationships are verified. Excluded entries never become action targets. Whitelists, preview and confirmation, batch limits, and a fresh relationship check before each action still apply. Unknown relationships in normal accounts or failed scans continue to block automatic processing. See [the changelog and test scope](CHANGELOG.md).
 
 ### Features
 
 - Connect to an X tab that you select, verify the signed-in account, and scan paginated following data and relationship information.
-- Review a complete scan before unfollowing. Unknown relationships and unconfirmed write results receive separate handling rather than being silently treated as success.
+- Review verified candidates after scanning before unfollowing. Unknown relationships and unconfirmed write results receive separate handling rather than being silently treated as success.
 - Manual confirmation, or automatic processing with a preview, explicit confirmation, interval and batch controls.
 - Pause scanning in either mode and resume from an in-memory checkpoint after account verification. Pause automatic processing from the main button or sidebar.
 - Maintain a whitelist per account, inspect the latest 500 activity records, and export a CSV to your own computer.
@@ -26,7 +26,7 @@ A scan checkpoint lasts only while the control page remains open. Closing or ref
 
 ### Download and install on Windows Chrome
 
-[**Download WhiteWolf 1.2.3 for Windows Chrome (ZIP)**](downloads/WhiteWolf-1.2.3-Windows-Chrome.zip?raw=true). This package is already built; ordinary users do not need Node.js, pnpm or a source build.
+[**Download WhiteWolf 1.2.4 for Windows Chrome (ZIP)**](downloads/WhiteWolf-1.2.4-Windows-Chrome.zip?raw=true). This package is already built; ordinary users do not need Node.js, pnpm or a source build.
 
 1. Extract the ZIP to a permanent folder.
 2. Open `chrome://extensions` in desktop Chrome 120 or later and enable **Developer mode**.
@@ -51,7 +51,7 @@ npx pnpm test
 
 Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `dist` directory. Chrome 120 or later is required by the manifest. The `dist` folder is the installable extension; the repository root is the source project.
 
-For an existing unpacked installation, preserve its path and extension identity when replacing the build, close its old control page, reload it in Chrome's extension manager, and verify version 1.2.3. A separately loaded directory or future Web Store installation may have a different extension identity and separate storage.
+For an existing unpacked installation, preserve its path and extension identity when replacing the build, close its old control page, reload it in Chrome's extension manager, and verify version 1.2.4. A separately loaded directory or future Web Store installation may have a different extension identity and separate storage.
 
 ### Development and verification
 
@@ -71,7 +71,7 @@ node tests/theme-image-browser.mjs
 
 `node scripts/icon-check.mjs` checks the current icons and isolated extension. Its optional historical visual comparison requires `OLD_ICON_DIR` pointing to a directory containing historical `16.png`, `32.png` and `128.png`; otherwise that comparison is explicitly skipped. Historical parser/pagination comparison scripts require the previous source/build and a separately downloaded pinned public fixture, as explained in [the technical notes](docs/technical-review-history.txt). They are not part of the standard unit-test command.
 
-The 1.2.3 release's automated checks used synthetic account data. This publication does not claim a new live-account scan, follow or unfollow test. X's web client is an external dependency and can change; an unavailable client or changed response schema can stop the extension.
+The 1.2.4 release's automated checks used synthetic account data. This publication does not claim a new live-account scan, follow or unfollow test. X's web client is an external dependency and can change; an unavailable client or changed response schema can stop the extension.
 
 ### Data and permissions
 
@@ -94,11 +94,11 @@ Report bugs and privacy questions at [GitHub Issues](https://github.com/HazalRob
 
 WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上关注的账号，识别没有回关你的账号，并通过手动确认或自动队列处理取消关注。支持按账号保存白名单及本地操作记录。
 
-当前版本为 **1.2.3**，采用 **MIT 许可证**。Chrome 应用商店提交正在准备中；本仓库不表示已通过审核或正式上架。WhiteWolf 是独立项目，与 X、Google 无官方关联，也未经其背书。
+当前版本为 **1.2.4**，采用 **MIT 许可证**。Chrome 应用商店提交正在准备中；本仓库不表示已通过审核或正式上架。WhiteWolf 是独立项目，与 X、Google 无官方关联，也未经其背书。
 
-### 1.2.3 扫描修复
+### 1.2.4 自动取关修复
 
-X 明确标记为不可用的账号条目不再中断整页扫描，而是单独计数并继续翻页。存在未核验条目时禁用自动取关，已核验的正常账号仍可逐项手动处理。详见[更新说明与验证范围](CHANGELOG.md)。
+扫描排除 X 明确标记为不可用的条目后，只要翻页完成、其余正常账号的关系均已核验，即可预览并确认自动取关。被排除条目不会进入操作队列；白名单、批次数量限制及每次操作前的实时复核继续生效。正常账号关系未知或扫描失败时，自动处理仍会停止。详见[更新说明与验证范围](CHANGELOG.md)。
 
 ### 功能与边界
 
@@ -114,7 +114,7 @@ X 明确标记为不可用的账号条目不再中断整页扫描，而是单独
 
 ### Windows Chrome 直接下载安装
 
-[**下载 WhiteWolf 1.2.3 Windows Chrome 安装包（ZIP）**](downloads/WhiteWolf-1.2.3-Windows-Chrome.zip?raw=true)。已构建完成，无需安装 Node.js 或自行编译。
+[**下载 WhiteWolf 1.2.4 Windows Chrome 安装包（ZIP）**](downloads/WhiteWolf-1.2.4-Windows-Chrome.zip?raw=true)。已构建完成，无需安装 Node.js 或自行编译。
 
 1. 将 ZIP 完整解压到固定文件夹。
 2. 在桌面 Chrome 120 或更新版本打开 `chrome://extensions`，开启“开发者模式”。
@@ -131,7 +131,7 @@ X 明确标记为不可用的账号条目不再中断整页扫描，而是单独
 
 打开 `chrome://extensions`，开启开发者模式，点击“加载已解压的扩展程序”，选择构建生成的 `dist` 文件夹。清单要求 Chrome 120 或更新版本。仓库根目录是源码，`dist` 才是可安装扩展。
 
-已有解压安装应保留原加载路径及扩展身份，替换构建后关闭旧控制页面，在扩展管理页重新加载并确认版本 1.2.3。另行加载目录或以后从商店安装，可能产生不同扩展身份及独立存储。
+已有解压安装应保留原加载路径及扩展身份，替换构建后关闭旧控制页面，在扩展管理页重新加载并确认版本 1.2.4。另行加载目录或以后从商店安装，可能产生不同扩展身份及独立存储。
 
 `npx pnpm dev` 启动本地合成数据演示。浏览器验证需先运行 `npx playwright install chromium`；具体命令见英文部分。可通过 `BROWSER_EXECUTABLE` 指定兼容浏览器。历史图标对比需显式提供 `OLD_ICON_DIR`，未提供时会明确跳过该项。旧版解析器与分页对比还需要历史源码/构建及单独下载的固定公开样本，并非普通单元测试的前置条件。
 

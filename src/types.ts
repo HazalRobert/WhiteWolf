@@ -18,6 +18,7 @@ export interface AppState {
   activeOperation?: 'scan' | 'auto' | 'manual' | 'author' | null;
   pausePending?: boolean; canResumeScan?: boolean;
   unavailableCount?: number;
+  autoReady?: boolean;
 }
 export interface Adapter {
   setSessionLostListener?(listener: (message: string) => void): void;

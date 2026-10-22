@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { Actions, AppState, Language, Row } from './types';
 import type { ConnectionAccess, XTabChoice } from './adapter';
-import { isWhitelisted } from './engine';
+import { isAutoReady, isWhitelisted } from './engine';
 import { languages, t } from './i18n';
 import { ThemeManager } from './ThemeManager';
 import { defaultThemes, loadThemes, saveThemes, type ThemeState } from './theme-store';
@@ -118,8 +118,9 @@ export default function App({ state, actions, connection }: { state: AppState; a
   const eligible = nonMutual.filter(row => row.outcome === 'pending' && !protectedRow(row));
   const completed = state.rows.filter(row => row.outcome === 'unfollowed').length;
   const isAuthorAccount = state.account?.handle.replace(/^@/, '').toLowerCase() === 'magicalstocker';
-  const canReconnectPausedRun = state.phase === 'paused' && !state.error && !!state.account && state.complete;
-  const canStart = (state.connected || canReconnectPausedRun) && state.complete && eligible.length > 0 && !busy && !scanPaused;
+  const autoReady = isAutoReady(state);
+  const canReconnectPausedRun = state.phase === 'paused' && !state.error && !!state.account && autoReady;
+  const canStart = (state.connected || canReconnectPausedRun) && autoReady && eligible.length > 0 && !busy && !scanPaused;
   const previewCount = Math.min(eligible.length, batchLimit);
 
   const filtered = useMemo(() => {
@@ -251,7 +252,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
         </div>
         {(state.scannedAt || scanActive || scanPaused || pausing || state.rows.length > 0) && <div className={`scan-status ${!state.complete ? 'scan-incomplete' : ''}`} aria-live="polite">
           {scanActive || pausing ? <LoaderCircle className="spin" size={13} /> : scanPaused ? <Pause size={14} /> : state.complete ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-          <span data-testid="scan-progress" data-phase={state.phase} data-complete={state.complete} data-pages={state.pages} data-checked={state.checked} data-paused={scanPaused}>{pausing ? tr('pausing') : scanPaused ? tr('scanPausedProgress', { pages: state.pages, checked: state.checked }) : scanActive ? tr('scanningProgress', { pages: state.pages, checked: state.checked }) : tr(state.complete ? 'completeScan' : state.scannedAt && (state.unavailableCount ?? 0) > 0 ? 'scanFinishedPartial' : 'incompleteScan')}</span>
+          <span data-testid="scan-progress" data-phase={state.phase} data-complete={state.complete} data-auto-ready={autoReady} data-pages={state.pages} data-checked={state.checked} data-paused={scanPaused}>{pausing ? tr('pausing') : scanPaused ? tr('scanPausedProgress', { pages: state.pages, checked: state.checked }) : scanActive ? tr('scanningProgress', { pages: state.pages, checked: state.checked }) : tr(state.complete ? 'completeScan' : state.scannedAt && (state.unavailableCount ?? 0) > 0 ? 'scanFinishedPartial' : 'incompleteScan')}</span>
           {state.scannedAt && !scanning && <time>{tr('scanTime', { time: formattedScanTime })}</time>}
         </div>}
         {(state.unavailableCount ?? 0) > 0 && <p className="scan-status scan-incomplete" data-testid="scan-unavailable" role="status">{tr('unavailableHelp', { count: state.unavailableCount! })}</p>}
@@ -339,7 +340,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
 
       <footer className="app-footer"><div className="author-credit"><span className="author-avatar">M<span /></span><div><span className="author-label">{tr('authorBy')}</span><a href="https://x.com/MagicalStocker" target="_blank" rel="noreferrer" dir="ltr">@MagicalStocker<ArrowUpRight size={12} /></a></div></div>
         <button className={`button button-author ${state.authorFollowed || isAuthorAccount ? 'author-followed' : ''}`} onClick={() => void actions.followAuthor()} disabled={!state.connected || state.authorFollowed || isAuthorAccount || busy || scanPaused}>{state.authorFollowed || isAuthorAccount ? <Check size={14} /> : <Heart size={14} />}{tr(isAuthorAccount ? 'authorSelf' : state.authorFollowed ? 'authorFollowed' : 'followAuthor')}</button>
-        <p className="footer-note">{tr('freeFooter')}<span className="footer-version" dir="ltr">WhiteWolf · v1.2.3</span></p>
+        <p className="footer-note">{tr('freeFooter')}<span className="footer-version" dir="ltr">WhiteWolf · v1.2.4</span></p>
       </footer>
 
       {tabChoices.length > 0 && <Modal title={tr('chooseXTab')} onClose={cancelSelection} closeLabel={tr('close')}>
