@@ -6,7 +6,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const root = process.cwd(), dist = path.join(root, 'dist'), output = path.join(root, 'qa/icon-1.2.2');
+const root = process.cwd(), dist = path.join(root, 'dist'), output = path.join(root, 'qa/icon-1.2.3');
 const oldIcons = process.env.OLD_ICON_DIR || null;
 const executablePath = process.env.BROWSER_EXECUTABLE || chromium.executablePath();
 const sizes = [16, 20, 24, 32, 48, 128];
@@ -43,7 +43,7 @@ try {
     return { sizes };
   });
   await test('manifest-registers-all-six-icon-sizes-without-permission-changes', async () => {
-    assert.equal(manifest.name, 'WhiteWolf'); assert.equal(manifest.version, '1.2.2'); assert.equal(manifest.manifest_version, 3);
+    assert.equal(manifest.name, 'WhiteWolf'); assert.equal(manifest.version, '1.2.3'); assert.equal(manifest.manifest_version, 3);
     const expected = Object.fromEntries(sizes.map(size => [String(size), `icons/${size}.png`]));
     assert.deepEqual(manifest.icons, expected); assert.deepEqual(manifest.action.default_icon, expected);
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage']);
@@ -87,13 +87,13 @@ try {
       }
       return { id: chrome.runtime.id, version: manifest.version, manifestVersion: manifest.manifest_version, icons, permissions: await chrome.permissions.getAll(), footer: document.querySelector('.footer-version').textContent.trim(), demo: !!document.querySelector('.demo-banner') };
     });
-    assert.equal(actual.id, extensionId); assert.equal(actual.version, '1.2.2'); assert.equal(actual.manifestVersion, 3);
+    assert.equal(actual.id, extensionId); assert.equal(actual.version, '1.2.3'); assert.equal(actual.manifestVersion, 3);
     assert.equal(actual.demo, false); assert.match(actual.footer, /WhiteWolf\s*[·.]\s*v1\.2\.2$/);
     assert.deepEqual(actual.permissions.origins, []);
     for (const image of actual.icons) { assert.equal(image.width, image.size); assert.equal(image.height, image.size); assert.equal(image.protocol, 'chrome-extension:'); }
     report.runtime = actual;
-    await page.screenshot({ path: path.join(output, 'isolated-extension-1.2.2.png'), fullPage: true });
-    report.screenshots.push('isolated-extension-1.2.2.png');
+    await page.screenshot({ path: path.join(output, 'isolated-extension-1.2.3.png'), fullPage: true });
+    report.screenshots.push('isolated-extension-1.2.3.png');
     return { footer: actual.footer, loadedIcons: actual.icons.length, grantedOrigins: actual.permissions.origins };
   });
   const comparison = await context.newPage();
@@ -125,7 +125,7 @@ try {
   if (oldIcons) await test('native-size-light-dark-before-after-comparison', async () => {
     const columns = [16, 20, 24, 32];
     const row = (version, values, old = false) => `<div class="row"><div class="label">${version}</div>${columns.map(size => `<div class="cell"><img data-native-size="${size}" width="${size}" height="${size}" src="${values[old && (size === 20 || size === 24) ? 32 : size]}"></div>`).join('')}</div>`;
-    const panel = (title, dark) => `<section class="panel ${dark ? 'dark' : ''}"><h2>${title}</h2><div class="row headings"><span></span>${columns.map(size => `<span>${size}px</span>`).join('')}</div>${row('旧版 1.2.0', oldFixtures, true)}${row('新版 1.2.2', fixtures)}</section>`;
+    const panel = (title, dark) => `<section class="panel ${dark ? 'dark' : ''}"><h2>${title}</h2><div class="row headings"><span></span>${columns.map(size => `<span>${size}px</span>`).join('')}</div>${row('旧版 1.2.0', oldFixtures, true)}${row('新版 1.2.3', fixtures)}</section>`;
     await comparison.setContent(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
       *{box-sizing:border-box}body{margin:0;background:#f2f4f7;color:#273543;font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}.sheet{padding:30px 32px;width:1040px}h1{margin:0;font-size:25px;letter-spacing:-.4px}.intro{margin:7px 0 23px;color:#5e6c79;font-size:15px}.panels{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{padding:20px;border:1px solid #dce3e9;border-radius:14px;background:#fff}h2{font-size:16px;margin:0 0 14px}.dark{background:#292a2d;color:#edf1f4;border-color:#292a2d}.row{display:grid;grid-template-columns:108px repeat(4,1fr);align-items:center;min-height:57px;gap:6px}.headings{min-height:25px;color:#788591;font-size:13px}.dark .headings{color:#bdc7d0}.row>span,.cell{text-align:center}.cell{display:flex;align-items:center;justify-content:center;min-height:42px}.label{font-size:14px}.large{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:20px}.large-card{background:#fff;border:1px solid #dce3e9;border-radius:14px;padding:18px 20px}.large-title{margin:0 0 15px;font-size:16px;font-weight:600}.large-row{display:flex;align-items:center;justify-content:space-around;gap:18px}.sample{display:flex;flex-direction:column;align-items:center;gap:8px;color:#5c6c7b}.pixel{image-rendering:pixelated}.note{margin:18px 0 0;color:#626f7a;font-size:13px}.footer{margin-top:13px;border-top:1px solid #d9e2e9;padding-top:12px;color:#536474;font-size:13px}
       </style></head><body><div class="sheet"><h1>WhiteWolf · 工具栏图标对照</h1><p class="intro">上排为旧版，下排为新版。浅色与深色背景均按实际像素显示。</p><div class="panels">${panel('浅色工具栏背景', false)}${panel('深色工具栏背景', true)}</div><div class="large"><section class="large-card"><p class="large-title">128px 原始资源</p><div class="large-row"><div class="sample"><img width="128" height="128" src="${oldFixtures[128]}"><span>旧版</span></div><div class="sample"><img width="128" height="128" src="${fixtures[128]}"><span>新版</span></div></div></section><section class="large-card"><p class="large-title">16px 像素结构 · 放大 8 倍</p><div class="large-row"><div class="sample"><img class="pixel" width="128" height="128" src="${oldFixtures[16]}"><span>旧版</span></div><div class="sample"><img class="pixel" width="128" height="128" src="${fixtures[16]}"><span>新版 · 简化细节</span></div></div></section></div><p class="note">旧版没有 20 / 24px 资源，此处从旧版 32px PNG 缩放作为对照；不代表 Chrome 在每台设备上的实际资源选择。新版各尺寸均使用对应 PNG。</p><p class="footer">仅图标补丁 · 六种尺寸 16 / 20 / 24 / 32 / 48 / 128px · 本机离线渲染 · 未使用用户浏览器资料</p></div></body></html>`);
@@ -151,5 +151,5 @@ finally {
   report.summary = { tests: report.tests.length, passed: report.tests.filter(item => item.passed).length, failed: report.tests.filter(item => !item.passed).length, pngs: report.pngs.length, externalRequests: report.httpRequests.length };
   report.passed = !report.failure && report.tests.length === (oldIcons ? 6 : 5) && report.summary.failed === 0;
   await writeFile(path.join(output, 'icon-report.json'), JSON.stringify(report, null, 2) + '\n');
-  console.log(JSON.stringify({ ...report.summary, overallPassed: report.passed, report: 'qa/icon-1.2.2/icon-report.json' }, null, 2));
+  console.log(JSON.stringify({ ...report.summary, overallPassed: report.passed, report: 'qa/icon-1.2.3/icon-report.json' }, null, 2));
 }

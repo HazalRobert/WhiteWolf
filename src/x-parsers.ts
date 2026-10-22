@@ -1,7 +1,7 @@
 /**
  * All runtime helpers stay inside this function so it can be serialized into an X page.
  * person/viewer/userGraphql return Person; relationFromUser accepts a raw User result;
- * followingGraphql returns { users, nextCursor, relations }. No browser access is used.
+ * followingGraphql returns { users, nextCursor, relations, unavailableCount? }. No browser access is used.
  */
 export function parseXPayload(
   kind: 'person' | 'followingGraphql' | 'viewer' | 'userGraphql' | 'relationFromUser',
@@ -26,11 +26,23 @@ export function parseXPayload(
     if (!/^[1-9][0-9]{0,19}$/.test(result)) return fail(`${path} must be a lossless decimal user ID.`);
     return result;
   };
-  const userResult = (raw: unknown): ObjectValue => {
-    let value = object(raw, 'User result');
-    if (value.__typename === 'UserWithVisibilityResults') value = object(value.user, 'UserWithVisibilityResults.user');
-    if (value.__typename !== undefined && value.__typename !== 'User') return fail('Unsupported or unavailable User result.');
-    return value;
+  // Diagnostic paths are fixed call-site labels, never response keys, entry IDs or account data.
+  const resultType = (value: unknown): string => value === undefined ? 'missing'
+    : typeof value === 'string' && /^User[A-Za-z0-9]{0,60}$/.test(value) ? value : 'unrecognized';
+  const unwrapUserResult = (raw: unknown, path: string): { value: ObjectValue; path: string } => {
+    let value = object(raw, path);
+    if (value.__typename === 'UserWithVisibilityResults') {
+      path += '.user';
+      value = object(value.user, path);
+    }
+    return { value, path };
+  };
+  const userResult = (raw: unknown, path = 'User result'): ObjectValue => {
+    const result = unwrapUserResult(raw, path);
+    if (result.value.__typename !== undefined && result.value.__typename !== 'User') {
+      return fail(`Unsupported or unavailable User result; path=${result.path}; typename=${resultType(result.value.__typename)}.`);
+    }
+    return result.value;
   };
   const userId = (value: ObjectValue): string => {
     const legacy = optionalObject(value.legacy, 'User.legacy');
@@ -52,8 +64,8 @@ export function parseXPayload(
     }
     return present[0] as string;
   };
-  const person = (raw: unknown): PersonValue => {
-    const value = userResult(raw);
+  const person = (raw: unknown, path = 'User result'): PersonValue => {
+    const value = userResult(raw, path);
     const legacy = optionalObject(value.legacy, 'User.legacy');
     const core = optionalObject(value.core, 'User.core');
     const avatar = optionalObject(value.avatar, 'User.avatar');
@@ -69,8 +81,8 @@ export function parseXPayload(
     if (description !== undefined) result.bio = description;
     return result;
   };
-  const relation = (raw: unknown): RelationValue => {
-    const value = userResult(raw);
+  const relation = (raw: unknown, path = 'User result'): RelationValue => {
+    const value = userResult(raw, path);
     const perspectives = optionalObject(value.relationship_perspectives, 'User.relationship_perspectives');
     const legacy = optionalObject(value.legacy, 'User.legacy');
     const boolean = (field: 'following' | 'followed_by'): boolean | null => {
@@ -88,29 +100,29 @@ export function parseXPayload(
   };
 
   if (kind === 'person') {
-    const result = person(payload);
+    const result = person(payload, 'person');
     expectId(result.id, context.expectedId ?? context.targetId);
     return result;
   }
   if (kind === 'relationFromUser') {
-    const result = relation(payload);
+    const result = relation(payload, 'relationFromUser');
     expectId(result.id, context.expectedId ?? context.targetId);
     return result;
   }
   if (kind === 'viewer') {
     const viewer = object(envelopeData().viewer, 'data.viewer');
-    const result = person(object(viewer.user_results, 'data.viewer.user_results').result);
+    const result = person(object(viewer.user_results, 'data.viewer.user_results').result, 'data.viewer.user_results.result');
     expectId(result.id, context.expectedId ?? context.actorId);
     return result;
   }
   if (kind === 'userGraphql') {
-    const result = person(object(envelopeData().user, 'data.user').result);
+    const result = person(object(envelopeData().user, 'data.user').result, 'data.user.result');
     expectId(result.id, context.expectedId ?? context.targetId);
     return result;
   }
   if (kind !== 'followingGraphql') return fail('Unknown parser kind.');
 
-  const rootUser = userResult(object(envelopeData().user, 'data.user').result);
+  const rootUser = userResult(object(envelopeData().user, 'data.user').result, 'data.user.result');
   if (rootUser.rest_id !== undefined || rootUser.id_str !== undefined) expectId(userId(rootUser), context.actorId ?? context.expectedId);
   if (rootUser.timeline !== undefined && rootUser.timeline_v2 !== undefined) return fail('Following response has ambiguous timeline containers.');
   const timelineRoot = object(rootUser.timeline ?? rootUser.timeline_v2, 'Following timeline container');
@@ -165,6 +177,7 @@ export function parseXPayload(
   const users: PersonValue[] = [];
   const relations: RelationValue[] = [];
   const userIds = new Set<string>();
+  let unavailableCount = 0;
   let bottomCursor: string | undefined;
   const entryType = (value: ObjectValue, field: 'entryType' | 'itemType', path: string): string => {
     const declared = [value[field], value.__typename].filter(item => item !== undefined);
@@ -187,11 +200,17 @@ export function parseXPayload(
       if (entryType(item, 'itemType', 'Timeline itemContent') !== 'TimelineUser') return fail('Following entry is not an explicit TimelineUser.');
       if (item.promotedMetadata !== undefined || content.promotedMetadata !== undefined) return fail('Promoted entries cannot establish a following relationship.');
       const rawUser = object(item.user_results, 'TimelineUser.user_results').result;
-      const user = person(rawUser);
+      const userPath = 'Following.TimelineUser.user_results.result';
+      const unwrapped = unwrapUserResult(rawUser, userPath);
+      // A known unavailable placeholder is not an actionable user or a negative
+      // follow-back relationship. Count it only after ClearCache/ReplaceEntry folding.
+      // Keep the same cursor rules, including pages containing only placeholders.
+      if (unwrapped.value.__typename === 'UserUnavailable') { unavailableCount++; continue; }
+      const user = person(rawUser, userPath);
       if (userIds.has(user.id)) return fail('Following page contains duplicate user IDs.');
       userIds.add(user.id);
       users.push(user);
-      relations.push(relation(rawUser));
+      relations.push(relation(rawUser, userPath));
     } else return fail('Unsupported Following entry wrapper.');
   }
   if (bottomCursor === undefined && !terminatedBottom) return fail('Following response has no explicit Bottom cursor or terminal page.');
@@ -199,5 +218,5 @@ export function parseXPayload(
   // termination flag before the cursor, so a stale/nonzero cursor is not a conflict.
   const nextCursor = terminatedBottom ? '0' : bottomCursor!;
   if (nextCursor !== '0' && context.cursor !== undefined && nextCursor === context.cursor) return fail('Following cursor did not advance.');
-  return { users, nextCursor, relations };
+  return { users, nextCursor, relations, ...(unavailableCount > 0 ? { unavailableCount } : {}) };
 }

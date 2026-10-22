@@ -251,9 +251,10 @@ export default function App({ state, actions, connection }: { state: AppState; a
         </div>
         {(state.scannedAt || scanActive || scanPaused || pausing || state.rows.length > 0) && <div className={`scan-status ${!state.complete ? 'scan-incomplete' : ''}`} aria-live="polite">
           {scanActive || pausing ? <LoaderCircle className="spin" size={13} /> : scanPaused ? <Pause size={14} /> : state.complete ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-          <span data-testid="scan-progress" data-pages={state.pages} data-checked={state.checked} data-paused={scanPaused}>{pausing ? tr('pausing') : scanPaused ? tr('scanPausedProgress', { pages: state.pages, checked: state.checked }) : scanActive ? tr('scanningProgress', { pages: state.pages, checked: state.checked }) : tr(state.complete ? 'completeScan' : 'incompleteScan')}</span>
+          <span data-testid="scan-progress" data-phase={state.phase} data-complete={state.complete} data-pages={state.pages} data-checked={state.checked} data-paused={scanPaused}>{pausing ? tr('pausing') : scanPaused ? tr('scanPausedProgress', { pages: state.pages, checked: state.checked }) : scanActive ? tr('scanningProgress', { pages: state.pages, checked: state.checked }) : tr(state.complete ? 'completeScan' : state.scannedAt && (state.unavailableCount ?? 0) > 0 ? 'scanFinishedPartial' : 'incompleteScan')}</span>
           {state.scannedAt && !scanning && <time>{tr('scanTime', { time: formattedScanTime })}</time>}
         </div>}
+        {(state.unavailableCount ?? 0) > 0 && <p className="scan-status scan-incomplete" data-testid="scan-unavailable" role="status">{tr('unavailableHelp', { count: state.unavailableCount! })}</p>}
         {scanPaused && <div className="scan-paused-note"><p>{tr('scanPausedHint')}</p><button className="button button-neutral button-small" data-testid="scan-restart" onClick={() => void actions.scan()} disabled={busy}><RefreshCw size={15} />{tr('restartScan')}</button></div>}
       </section>
 
@@ -338,7 +339,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
 
       <footer className="app-footer"><div className="author-credit"><span className="author-avatar">M<span /></span><div><span className="author-label">{tr('authorBy')}</span><a href="https://x.com/MagicalStocker" target="_blank" rel="noreferrer" dir="ltr">@MagicalStocker<ArrowUpRight size={12} /></a></div></div>
         <button className={`button button-author ${state.authorFollowed || isAuthorAccount ? 'author-followed' : ''}`} onClick={() => void actions.followAuthor()} disabled={!state.connected || state.authorFollowed || isAuthorAccount || busy || scanPaused}>{state.authorFollowed || isAuthorAccount ? <Check size={14} /> : <Heart size={14} />}{tr(isAuthorAccount ? 'authorSelf' : state.authorFollowed ? 'authorFollowed' : 'followAuthor')}</button>
-        <p className="footer-note">{tr('freeFooter')}<span className="footer-version" dir="ltr">WhiteWolf · v1.2.2</span></p>
+        <p className="footer-note">{tr('freeFooter')}<span className="footer-version" dir="ltr">WhiteWolf · v1.2.3</span></p>
       </footer>
 
       {tabChoices.length > 0 && <Modal title={tr('chooseXTab')} onClose={cancelSelection} closeLabel={tr('close')}>

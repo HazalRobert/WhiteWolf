@@ -6,7 +6,11 @@
 
 WhiteWolf is a free, open-source Chrome extension for reviewing the X accounts you follow and identifying accounts that do not follow you back. It provides manual and automatic unfollow workflows, an account-specific whitelist, and a local activity log.
 
-Version: **1.2.2**. License: **MIT**. Chrome Web Store submission is being prepared; this repository does not claim an approved or published store listing. WhiteWolf is an independent project and is not affiliated with or endorsed by X or Google.
+Version: **1.2.3**. License: **MIT**. Chrome Web Store submission is being prepared; this repository does not claim an approved or published store listing. WhiteWolf is an independent project and is not affiliated with or endorsed by X or Google.
+
+### 1.2.3 scan fix
+
+Explicit unavailable-user placeholders no longer abort Following pagination. Excluded entries are counted separately; automatic processing stays disabled if any are unverified. Verified normal accounts remain available for individual review. See [the changelog and test scope](CHANGELOG.md).
 
 ### Features
 
@@ -22,7 +26,7 @@ A scan checkpoint lasts only while the control page remains open. Closing or ref
 
 ### Download and install on Windows Chrome
 
-[**Download WhiteWolf 1.2.2 for Windows Chrome (ZIP)**](downloads/WhiteWolf-1.2.2-Windows-Chrome.zip?raw=true). This package is already built; ordinary users do not need Node.js, pnpm or a source build.
+[**Download WhiteWolf 1.2.3 for Windows Chrome (ZIP)**](downloads/WhiteWolf-1.2.3-Windows-Chrome.zip?raw=true). This package is already built; ordinary users do not need Node.js, pnpm or a source build.
 
 1. Extract the ZIP to a permanent folder.
 2. Open `chrome://extensions` in desktop Chrome 120 or later and enable **Developer mode**.
@@ -31,7 +35,7 @@ A scan checkpoint lasts only while the control page remains open. Closing or ref
 
 [Detailed installation instructions / 中文安装说明](downloads/README.md) · [SHA-256 checksum](downloads/SHA256SUMS.txt)
 
-Keep the extracted folder in place. This download provides Windows Chrome installation support; Mac installation and compatibility verification are planned. Existing users of 1.2.2 do not need to reinstall; loading a different directory may create a separate extension identity and storage.
+Keep the extracted folder in place. This download provides Windows Chrome installation support; Mac installation and compatibility verification are planned. To upgrade an existing installation, back up its folder, replace the build in the same loaded directory, close the old control page, and reload the extension in Chrome. Loading a different directory may create a separate extension identity and storage.
 
 ### Build and load locally
 
@@ -47,7 +51,7 @@ npx pnpm test
 
 Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `dist` directory. Chrome 120 or later is required by the manifest. The `dist` folder is the installable extension; the repository root is the source project.
 
-For an existing unpacked installation, preserve its path and extension identity when replacing the build, close its old control page, reload it in Chrome's extension manager, and verify version 1.2.2. A separately loaded directory or future Web Store installation may have a different extension identity and separate storage.
+For an existing unpacked installation, preserve its path and extension identity when replacing the build, close its old control page, reload it in Chrome's extension manager, and verify version 1.2.3. A separately loaded directory or future Web Store installation may have a different extension identity and separate storage.
 
 ### Development and verification
 
@@ -58,6 +62,7 @@ npx playwright install chromium
 npx pnpm test:browser
 npx pnpm test:design
 node scripts/scan-pause-browser.mjs
+node scripts/unavailable-browser.mjs
 node scripts/themed-layout-check.mjs
 node tests/theme-image-browser.mjs
 ```
@@ -66,7 +71,7 @@ node tests/theme-image-browser.mjs
 
 `node scripts/icon-check.mjs` checks the current icons and isolated extension. Its optional historical visual comparison requires `OLD_ICON_DIR` pointing to a directory containing historical `16.png`, `32.png` and `128.png`; otherwise that comparison is explicitly skipped. Historical parser/pagination comparison scripts require the previous source/build and a separately downloaded pinned public fixture, as explained in [the technical notes](docs/technical-review-history.txt). They are not part of the standard unit-test command.
 
-The 1.2.2 release's automated checks used synthetic account data. This publication does not claim a new live-account scan, follow or unfollow test. X's web client is an external dependency and can change; an unavailable client or changed response schema can stop the extension.
+The 1.2.3 release's automated checks used synthetic account data. This publication does not claim a new live-account scan, follow or unfollow test. X's web client is an external dependency and can change; an unavailable client or changed response schema can stop the extension.
 
 ### Data and permissions
 
@@ -89,7 +94,11 @@ Report bugs and privacy questions at [GitHub Issues](https://github.com/HazalRob
 
 WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上关注的账号，识别没有回关你的账号，并通过手动确认或自动队列处理取消关注。支持按账号保存白名单及本地操作记录。
 
-当前版本为 **1.2.2**，采用 **MIT 许可证**。Chrome 应用商店提交正在准备中；本仓库不表示已通过审核或正式上架。WhiteWolf 是独立项目，与 X、Google 无官方关联，也未经其背书。
+当前版本为 **1.2.3**，采用 **MIT 许可证**。Chrome 应用商店提交正在准备中；本仓库不表示已通过审核或正式上架。WhiteWolf 是独立项目，与 X、Google 无官方关联，也未经其背书。
+
+### 1.2.3 扫描修复
+
+X 明确标记为不可用的账号条目不再中断整页扫描，而是单独计数并继续翻页。存在未核验条目时禁用自动取关，已核验的正常账号仍可逐项手动处理。详见[更新说明与验证范围](CHANGELOG.md)。
 
 ### 功能与边界
 
@@ -105,7 +114,7 @@ WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上�
 
 ### Windows Chrome 直接下载安装
 
-[**下载 WhiteWolf 1.2.2 Windows Chrome 安装包（ZIP）**](downloads/WhiteWolf-1.2.2-Windows-Chrome.zip?raw=true)。已构建完成，无需安装 Node.js 或自行编译。
+[**下载 WhiteWolf 1.2.3 Windows Chrome 安装包（ZIP）**](downloads/WhiteWolf-1.2.3-Windows-Chrome.zip?raw=true)。已构建完成，无需安装 Node.js 或自行编译。
 
 1. 将 ZIP 完整解压到固定文件夹。
 2. 在桌面 Chrome 120 或更新版本打开 `chrome://extensions`，开启“开发者模式”。
@@ -114,7 +123,7 @@ WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上�
 
 [详细中文安装说明](downloads/README.md) · [SHA-256 校验值](downloads/SHA256SUMS.txt)
 
-安装后保留该文件夹。当前提供 Windows Chrome 安装支持；Mac 安装与适配验证会尽快补上。已经安装 1.2.2 无需重复安装；换目录加载可能产生新的扩展身份及独立存储。
+安装后保留该文件夹。当前提供 Windows Chrome 安装支持；Mac 安装与适配验证会尽快补上。旧版用户应先备份原目录，再覆盖更新原加载目录内的文件，关闭旧控制页后重新加载扩展；不要卸载或换目录，以免产生新的扩展身份及独立存储。
 
 ### 本地构建与安装
 
@@ -122,7 +131,7 @@ WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上�
 
 打开 `chrome://extensions`，开启开发者模式，点击“加载已解压的扩展程序”，选择构建生成的 `dist` 文件夹。清单要求 Chrome 120 或更新版本。仓库根目录是源码，`dist` 才是可安装扩展。
 
-已有解压安装应保留原加载路径及扩展身份，替换构建后关闭旧控制页面，在扩展管理页重新加载并确认版本 1.2.2。另行加载目录或以后从商店安装，可能产生不同扩展身份及独立存储。
+已有解压安装应保留原加载路径及扩展身份，替换构建后关闭旧控制页面，在扩展管理页重新加载并确认版本 1.2.3。另行加载目录或以后从商店安装，可能产生不同扩展身份及独立存储。
 
 `npx pnpm dev` 启动本地合成数据演示。浏览器验证需先运行 `npx playwright install chromium`；具体命令见英文部分。可通过 `BROWSER_EXECUTABLE` 指定兼容浏览器。历史图标对比需显式提供 `OLD_ICON_DIR`，未提供时会明确跳过该项。旧版解析器与分页对比还需要历史源码/构建及单独下载的固定公开样本，并非普通单元测试的前置条件。
 

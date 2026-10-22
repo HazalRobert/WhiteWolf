@@ -9,7 +9,7 @@ import { fixtureActor, fixtureIds, installXFixture } from './x-fixture.mjs';
 // are fulfilled in memory; a dead loopback proxy also blocks accidental forwarding.
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const root = process.cwd(), dist = path.join(root, 'dist'), output = path.join(root, 'qa/scan-pause-1.2.2');
+const root = process.cwd(), dist = path.join(root, 'dist'), output = path.join(root, 'qa/scan-pause-1.2.3');
 const executablePath = process.env.BROWSER_EXECUTABLE || chromium.executablePath();
 const themeKey = 'whitewolf_themes_v1';
 const report = {
@@ -33,7 +33,7 @@ const manifestBytes = await readFile(path.join(dist, 'manifest.json'));
 const manifest = JSON.parse(manifestBytes.toString('utf8'));
 report.manifestSha256 = digest(manifestBytes);
 report.distIndexSha256 = digest(await readFile(path.join(dist, 'index.html')));
-assert.equal(manifest.version, '1.2.2', 'Build the requested release before running this script.');
+assert.equal(manifest.version, '1.2.3', 'Build the requested release before running this script.');
 assert.equal(manifest.host_permissions, undefined, 'Only the disposable test copy may grant fixture access.');
 
 let context, ui, worker, fixture, networkGate = null;
@@ -356,7 +356,7 @@ try {
     const storage = await worker.evaluate(() => chrome.storage.local.get(null));
     const serialized = JSON.stringify(storage);
     assert.ok(!serialized.includes('synthetic-fixture-not-a-secret') && !serialized.includes('Bearer'));
-    assert.equal((await ui.locator('.footer-version').innerText()).includes('v1.2.2'), true);
+    assert.equal((await ui.locator('.footer-version').innerText()).includes('v1.2.3'), true);
     return { layouts: report.layouts.length, languages: ['zh-CN', 'fr', 'ar'], widths: [1100, 360], themes: ['minimal', 'wolf', 'custom'], modes: ['manual', 'auto'], pageErrors: 0, externalRequests: 0 };
   });
   report.passed = true;

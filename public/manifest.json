@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3, "name": "WhiteWolf", "version": "1.2.2",
+  "manifest_version": 3, "name": "WhiteWolf", "version": "1.2.3",
   "description": "Review accounts that do not follow you back. Manual and automatic modes, whitelist, and ten languages. Free.",
   "minimum_chrome_version": "120",
   "permissions": ["activeTab", "scripting", "storage"],

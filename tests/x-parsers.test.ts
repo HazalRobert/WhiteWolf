@@ -30,7 +30,7 @@ const page = (instructions: unknown[], field = 'timeline') => ({ data: { user: {
 } } } });
 const add = (entries: unknown[]) => ({ type: 'TimelineAddEntries', entries });
 const following = (payload: unknown, context = {}) => parseXPayload('followingGraphql', payload, context) as {
-  users: { id: string; handle: string; name: string }[]; nextCursor: string;
+  users: { id: string; handle: string; name: string }[]; nextCursor: string; unavailableCount?: number;
   relations: { id: string; following: boolean | null; followedBy: boolean | null }[];
 };
 
@@ -86,6 +86,109 @@ test('both known Following timeline containers return users, relations and opaqu
     assert.deepEqual(result.relations, [{ id: '101', following: true, followedBy: false }]);
   }
 });
+// Shape evidence: X's public main.50f2837e51ebc2a7a.js (modules 281336 and 127707)
+// omits non-User TimelineUser results. Its user-query handler explicitly recognizes
+// UserUnavailable and reason Suspended. Values below are synthetic, not a live capture.
+const unavailableUser = () => ({ __typename: 'UserUnavailable', reason: 'Suspended', message: 'Synthetic unavailable account.' });
+
+test('Following counts explicit unavailable entries without inventing users, identities or relationships', () => {
+  const unavailable = { ...unavailableUser(), rest_id: '999', core: { screen_name: 'must_not_display', name: 'Hidden' }, relationship_perspectives: { following: true, followed_by: false } };
+  const result = following(page([add([userEntry(modernUser()), userEntry(unavailable, 'user-999'), cursorEntry('next-page')])]), { cursor: 'previous-page' });
+  assert.deepEqual(result.users, [parseXPayload('person', modernUser())]);
+  assert.deepEqual(result.relations, [{ id: '101', following: true, followedBy: false }]);
+  assert.equal(result.nextCursor, 'next-page');
+  assert.equal(result.unavailableCount, 1);
+  assert.equal(JSON.stringify(result).includes('must_not_display'), false);
+  assert.equal(JSON.stringify(result).includes('999'), false);
+  assert.equal(Object.hasOwn(following(page([add([userEntry(modernUser()), cursorEntry()])])), 'unavailableCount'), false);
+});
+
+test('a Following page containing only unavailable entries retains its verified continuation or terminal state', () => {
+  const entries = [userEntry(unavailableUser(), 'user-201'), userEntry({ __typename: 'UserUnavailable' }, 'user-202')];
+  assert.deepEqual(following(page([add([...entries, cursorEntry('opaque-next')])]), { cursor: 'opaque-previous' }),
+    { users: [], nextCursor: 'opaque-next', relations: [], unavailableCount: 2 });
+  assert.deepEqual(following(page([add(entries), { type: 'TimelineTerminateTimeline', direction: 'Bottom' }])),
+    { users: [], nextCursor: '0', relations: [], unavailableCount: 2 });
+  assert.throws(() => following(page([add(entries)])), /no explicit Bottom/);
+  assert.throws(() => following(page([add([...entries, cursorEntry('same')])]), { cursor: 'same' }), /did not advance/);
+  assert.throws(() => following(page([add([...entries, cursorEntry('bad cursor')])])), /cursor value/);
+});
+
+test('only the existing explicit visibility wrapper may contain an unavailable Following result', () => {
+  const wrapped = { __typename: 'UserWithVisibilityResults', user: unavailableUser() };
+  assert.deepEqual(following(page([add([userEntry(wrapped), cursorEntry('0')])])),
+    { users: [], nextCursor: '0', relations: [], unavailableCount: 1 });
+  for (const invalid of [
+    { __typename: 'UnknownWrapper', user: unavailableUser() },
+    { __typename: 'UserWithVisibilityResults', user: { __typename: 'UserWithVisibilityResults', user: unavailableUser() } },
+    { user: unavailableUser() },
+  ]) assert.throws(() => following(page([add([userEntry(invalid), cursorEntry('0')])])), /SCHEMA:/);
+});
+
+test('unavailable roots, Viewer, user lookup, persons and relationship lookup remain strict', () => {
+  for (const raw of [unavailableUser(), { __typename: 'UserWithVisibilityResults', user: unavailableUser() }]) {
+    assert.throws(() => parseXPayload('person', raw), /path=person(?:\.user)?; typename=UserUnavailable/);
+    assert.throws(() => parseXPayload('relationFromUser', raw), /path=relationFromUser(?:\.user)?; typename=UserUnavailable/);
+    assert.throws(() => parseXPayload('viewer', { data: { viewer: { user_results: { result: raw } } } }), /path=data\.viewer\.user_results\.result(?:\.user)?; typename=UserUnavailable/);
+    assert.throws(() => parseXPayload('userGraphql', { data: { user: { result: raw } } }), /path=data\.user\.result(?:\.user)?; typename=UserUnavailable/);
+    assert.throws(() => following({ data: { user: { result: { ...raw, timeline: { timeline: { instructions: [] } } } } } }), /path=data\.user\.result(?:\.user)?; typename=UserUnavailable/);
+  }
+});
+
+test('Following never skips unknown result types, malformed users or absent results', () => {
+  for (const raw of [null, undefined, [], {}, { __typename: 'User' },
+    { __typename: 'UserUnknownFutureType' }, { __typename: 'TweetTombstone' },
+    { __typename: 'UserWithVisibilityResults', user: null },
+    { __typename: 'UserWithVisibilityResults', user: { __typename: 'UserUnknownFutureType' } },
+    { ...modernUser(), rest_id: 101 },
+  ]) assert.throws(() => following(page([add([userEntry(raw), cursorEntry('0')])])), /SCHEMA:/);
+});
+
+test('unknown User diagnostics expose only fixed paths and bounded type names', () => {
+  assert.throws(() => following(page([add([userEntry({ __typename: 'UserUnknownFutureType' }), cursorEntry('0')])])),
+    /path=Following\.TimelineUser\.user_results\.result; typename=UserUnknownFutureType/);
+  for (const typename of [null, 42, {}, 'User' + 'A'.repeat(61), 'UserBad\nprivate-secret', 'private-secret', 'UserBad;token=secret']) {
+    let message = '';
+    try { following(page([add([userEntry({ __typename: typename, reason: 'private-reason', message: 'private-message', rest_id: '1922333444555666777' }, 'private-entry-id'), cursorEntry('0')])])); }
+    catch (error) { message = (error as Error).message; }
+    assert.match(message, /path=Following\.TimelineUser\.user_results\.result; typename=unrecognized/);
+    assert.ok(message.length < 256);
+    assert.equal(/private-|1922333444555666777|token=secret|[\r\n]/.test(message), false);
+  }
+});
+
+test('ClearCache discards unavailable entries that precede its position', () => {
+  assert.deepEqual(following(page([
+    add([userEntry(unavailableUser()), cursorEntry('before-reset')]),
+    { type: 'TimelineClearCache' }, add([userEntry(modernUser()), cursorEntry('0')]),
+  ]), { cursor: '-1' }), following(page([add([userEntry(modernUser()), cursorEntry('0')])])));
+  assert.deepEqual(following(page([
+    add([userEntry(modernUser()), cursorEntry('before-reset')]), { type: 'TimelineClearCache' },
+    add([userEntry(unavailableUser()), cursorEntry('0')]),
+  ]), { cursor: '-1' }), { users: [], nextCursor: '0', relations: [], unavailableCount: 1 });
+});
+
+test('ReplaceEntry counts only the final User or unavailable replacement', () => {
+  const replacement = (user: unknown) => ({ type: 'TimelineReplaceEntry', entry_id_to_replace: 'user-101', entry: userEntry(user, 'user-202') });
+  const restored = following(page([add([userEntry(unavailableUser()), cursorEntry('next')]), replacement(modernUser('202'))]));
+  assert.deepEqual(restored.users.map(user => user.id), ['202']);
+  assert.deepEqual(restored.relations, [{ id: '202', following: true, followedBy: false }]);
+  assert.equal(Object.hasOwn(restored, 'unavailableCount'), false);
+  assert.deepEqual(following(page([add([userEntry(modernUser()), cursorEntry('next')]), replacement(unavailableUser())])),
+    { users: [], nextCursor: 'next', relations: [], unavailableCount: 1 });
+  assert.throws(() => following(page([replacement(unavailableUser()), add([cursorEntry('0')])])), /no page-local target/);
+});
+
+test('unavailable entries do not bypass promotion, wrapper or duplicate-entry checks', () => {
+  const promoted = userEntry(unavailableUser());
+  Object.assign(promoted.content.itemContent, { promotedMetadata: {} });
+  assert.throws(() => following(page([add([promoted, cursorEntry('0')])])), /Promoted/);
+  assert.throws(() => following(page([add([userEntry(unavailableUser()), userEntry(unavailableUser()), cursorEntry('0')])])), /duplicate entry/);
+  const unknown = userEntry(unavailableUser());
+  Object.assign(unknown.content, { entryType: 'UnknownWrapper', __typename: 'UnknownWrapper' });
+  assert.throws(() => following(page([add([unknown, cursorEntry('0')])])), /Unsupported Following entry wrapper/);
+});
+
 test('known entry typename can stand alone but inconsistent declarations fail', () => {
   const entry = userEntry(modernUser()) as unknown as { entryId: string; content: Record<string, unknown> };
   delete entry.content.entryType;
@@ -233,6 +336,7 @@ test('serialized production parser runs without module scope or browser dependen
   const moduleValue = { exports: {} as { parseXPayload?: typeof parseXPayload } };
   new Function('module', 'exports', compiled.outputFiles[0].text)(moduleValue, moduleValue.exports);
   const isolated = runInNewContext(`(${moduleValue.exports.parseXPayload!.toString()})`) as typeof parseXPayload;
-  const result = isolated('followingGraphql', page([add([userEntry(modernUser()), cursorEntry()])]), { actorId: '900' });
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), following(page([add([userEntry(modernUser()), cursorEntry()])]), { actorId: '900' }));
+  const payload = page([add([userEntry(modernUser()), userEntry(unavailableUser(), 'user-202'), cursorEntry()])]);
+  const result = isolated('followingGraphql', payload, { actorId: '900' });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), following(payload, { actorId: '900' }));
 });

@@ -1,1 +1,2 @@
+128308b784d23be6fe64027c004d748621be9ac8efd85fac0d661cd0f66c9a3a  WhiteWolf-1.2.3-Windows-Chrome.zip
 c2188b26893583f397c148cace192fe5ca185ae4ee350e2b9c1430bf2f5b2534  WhiteWolf-1.2.2-Windows-Chrome.zip

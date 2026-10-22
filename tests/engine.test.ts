@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Controller, parseHandles, isWhitelisted, csvCell } from '../src/engine';
 import { emptySaved, type Repository, type Saved } from '../src/storage';
-import type { Adapter, Relation } from '../src/types';
+import type { Adapter, FollowingPage, Relation } from '../src/types';
 class Memory implements Repository{data=emptySaved();async read(){return structuredClone(this.data)}async write(data:Saved){this.data=structuredClone(data)}}
 class Fake implements Adapter{
   account={id:'99',handle:'tester',name:'Tester'}; writes:string[]=[]; followCalls=0; mutateError=''; identityError=''; pageCalls=0; missing=false; repeated=false; reversed=false; changed=false;
@@ -11,7 +11,7 @@ class Fake implements Adapter{
   loseSession(message='WORKER_RESTART: Synthetic control connection stopped'){this.sessionLost?.(message)}
   async connect(){return this.changed?{...this.account,id:'98'}:this.account}
   async identity(){if(this.identityError)throw new Error(this.identityError);return this.account}
-  async following(_actor:string,_cursor:string){this.pageCalls++;return {users:[{id:'1',handle:'alice',name:'Alice'},{id:'2',handle:'bob',name:'Bob'}],nextCursor:this.repeated?'123':'0'}}
+  async following(_actor:string,_cursor:string):Promise<FollowingPage>{this.pageCalls++;return {users:[{id:'1',handle:'alice',name:'Alice'},{id:'2',handle:'bob',name:'Bob'}],nextCursor:this.repeated?'123':'0'}}
   async relations(_actor:string,ids:string[]):Promise<Relation[]>{return ids.filter(id=>!this.missing||id==='1').map(id=>({id,following:true,followedBy:this.reversed}))}
   async resolve(_actor:string,handle:string){return {id:handle==='alice'?'1':'2',handle,name:handle}}
   async unfollow(_actor:string,id:string){if(this.mutateError)throw new Error(this.mutateError);this.writes.push(id)}
@@ -309,4 +309,202 @@ test('session loss while persisting a verified manual write settles to error wit
   assert.deepEqual(memory.data.unresolved['99'],[]);
   assert.deepEqual(memory.data.logs.filter(entry=>entry.targetId==='1').map(entry=>entry.result),['intent','verified']);
   assert.deepEqual(adapter.writes,['1']);
+});
+
+test('mixed Following pages count unavailable accounts and block automatic writes while preserving explicit verified choices',async()=>{
+  const {c,adapter}=await setup(),lookups:string[][]=[];
+  adapter.following=async()=>({users:[{id:'1',handle:'alice',name:'Alice'},{id:'2',handle:'bob',name:'Bob'}],nextCursor:'0',unavailableCount:2});
+  adapter.relations=async(_actor,ids)=>{
+    lookups.push([...ids]);
+    return ids.map(id=>({id,following:true,followedBy:false}));
+  };
+  await c.scan();
+  assert.equal(c.getSnapshot().unavailableCount,2);assert.equal(c.getSnapshot().pages,1);assert.equal(c.getSnapshot().checked,2);
+  assert.equal(c.getSnapshot().complete,false);assert.equal(c.getSnapshot().phase,'ready');assert.equal(c.getSnapshot().error,null);
+  assert.ok(c.getSnapshot().rows.every(row=>row.relation.following===true&&row.relation.followedBy===false));
+  await c.startAuto();
+  assert.deepEqual(adapter.writes,[]);assert.deepEqual(lookups,[['1','2']]);assert.match(c.getSnapshot().error!,/^INCOMPLETE:/);
+  await c.unfollow('1');
+  assert.deepEqual(lookups,[['1','2'],['1']]);assert.deepEqual(adapter.writes,['1']);
+  assert.equal(c.getSnapshot().rows[0].outcome,'unfollowed');assert.equal(c.getSnapshot().unavailableCount,2);
+  assert.equal(c.getSnapshot().complete,false);
+});
+
+test('unavailable accounts never bypass the fresh relationship check for a manual choice',async()=>{
+  const {c,adapter}=await setup();
+  adapter.following=async()=>({users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'0',unavailableCount:1});
+  await c.scan();
+  let freshLookups=0;
+  adapter.relations=async(_actor,ids)=>{freshLookups++;assert.deepEqual(ids,['1']);return [{id:'1',following:null,followedBy:null}];};
+  await c.unfollow('1');
+  assert.equal(freshLookups,1);assert.match(c.getSnapshot().error!,/^SCHEMA: Current relationship unknown/);
+  assert.deepEqual(adapter.writes,[]);assert.deepEqual(c.getSnapshot().logs,[]);assert.equal(c.getSnapshot().unavailableCount,1);
+});
+
+test('a page containing only unavailable accounts advances to normal pages and accumulates counts',async()=>{
+  const {c,adapter}=await setup(),cursors:string[]=[];
+  adapter.following=async(_actor,cursor)=>{
+    cursors.push(cursor);
+    if(cursor==='-1')return {users:[],nextCursor:'unavailable-page|next',unavailableCount:3};
+    assert.equal(cursor,'unavailable-page|next');
+    return {users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'0',unavailableCount:2};
+  };
+  let relationCalls=0;
+  adapter.relations=async(_actor,ids)=>{
+    relationCalls++;assert.deepEqual(ids,['1']);assert.equal(c.getSnapshot().unavailableCount,5);
+    return [{id:'1',following:true,followedBy:false}];
+  };
+  await c.scan();
+  assert.deepEqual(cursors,['-1','unavailable-page|next']);assert.equal(c.getSnapshot().pages,2);
+  assert.equal(relationCalls,1);assert.deepEqual(c.getSnapshot().rows.map(row=>row.id),['1']);
+  assert.equal(c.getSnapshot().unavailableCount,5);assert.equal(c.getSnapshot().complete,false);assert.equal(c.getSnapshot().checked,1);
+  assert.equal(c.getSnapshot().error,null);assert.deepEqual(adapter.writes,[]);
+});
+
+test('a terminal page containing only unavailable accounts remains incomplete without inventing candidate rows',async()=>{
+  const {c,adapter}=await setup();let relations=0;
+  adapter.following=async()=>({users:[],nextCursor:'0',unavailableCount:4});
+  adapter.relations=async()=>{relations++;return [];};
+  await c.scan();
+  assert.equal(c.getSnapshot().pages,1);assert.equal(c.getSnapshot().unavailableCount,4);assert.equal(c.getSnapshot().complete,false);
+  assert.equal(c.getSnapshot().phase,'ready');assert.deepEqual(c.getSnapshot().rows,[]);assert.equal(relations,0);
+  await c.startAuto();assert.match(c.getSnapshot().error!,/^INCOMPLETE:/);assert.deepEqual(adapter.writes,[]);
+});
+
+for(const unavailableCount of [undefined,0]){
+  test(`a nonterminal cursor-only page with ${String(unavailableCount)} unavailable accounts still fails closed`,async()=>{
+    const {c,adapter}=await setup();let relations=0;
+    adapter.following=async()=>({users:[],nextCursor:'next',...(unavailableCount===undefined?{}:{unavailableCount})});
+    adapter.relations=async()=>{relations++;return [];};
+    await c.scan();
+    assert.match(c.getSnapshot().error!,/^INCOMPLETE:/);assert.equal(c.getSnapshot().pages,0);
+    assert.equal(c.getSnapshot().unavailableCount,0);assert.equal(c.getSnapshot().complete,false);
+    assert.deepEqual(c.getSnapshot().rows,[]);assert.equal(relations,0);assert.deepEqual(adapter.writes,[]);
+  });
+}
+
+for(const unavailableCount of [-1,0.5,'2',null,true,NaN,Infinity,{}]){
+  test(`invalid unavailableCount ${String(unavailableCount)} rejects the entire page before committing its rows or count`,async()=>{
+    const {c,adapter}=await setup();let relations=0;
+    adapter.following=async(_actor,cursor)=>cursor==='-1'
+      ?{users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'next',unavailableCount:2}
+      :{users:[{id:'2',handle:'bob',name:'Bob'}],nextCursor:'0',unavailableCount} as never;
+    adapter.relations=async()=>{relations++;return [];};
+    await c.scan();
+    assert.match(c.getSnapshot().error!,/^SCHEMA:/);assert.equal(c.getSnapshot().connected,false);
+    assert.equal(c.getSnapshot().unavailableCount,2);assert.equal(c.getSnapshot().pages,1);assert.equal(c.getSnapshot().checked,0);
+    assert.deepEqual(c.getSnapshot().rows.map(row=>row.id),['1']);assert.equal(c.getSnapshot().complete,false);
+    assert.equal(relations,0);assert.deepEqual(adapter.writes,[]);
+  });
+}
+
+for(const [label,page] of [
+  ['invalid account',{users:[{id:'bad-id',handle:'bob',name:'Bob'}],nextCursor:'0',unavailableCount:7}],
+  ['invalid relationship evidence',{users:[{id:'2',handle:'bob',name:'Bob'}],nextCursor:'0',unavailableCount:7,relations:[]}],
+  ['invalid cursor',{users:[{id:'2',handle:'bob',name:'Bob'}],nextCursor:'bad cursor',unavailableCount:7}],
+  ['duplicate account page',{users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'0',unavailableCount:7}],
+] satisfies Array<[string,FollowingPage]>){
+  test(`${label} never commits an otherwise valid unavailable count`,async()=>{
+    const {c,adapter}=await setup();let relations=0;
+    adapter.following=async(_actor,cursor)=>cursor==='-1'
+      ?{users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'next',unavailableCount:2}
+      :structuredClone(page);
+    adapter.relations=async()=>{relations++;return [];};
+    await c.scan();
+    assert.match(c.getSnapshot().error!,/^(SCHEMA|INCOMPLETE):/);assert.equal(c.getSnapshot().pages,1);
+    assert.equal(c.getSnapshot().unavailableCount,2);assert.deepEqual(c.getSnapshot().rows.map(row=>row.id),['1']);
+    assert.equal(c.getSnapshot().complete,false);assert.equal(relations,0);assert.deepEqual(adapter.writes,[]);
+  });
+}
+
+for(const nextCursor of ['next','-1']){
+  test(`unavailable-only cursor cycle back to ${nextCursor} is rejected before a second count is committed`,async()=>{
+    const {c,adapter}=await setup(),cursors:string[]=[];
+    adapter.following=async(_actor,cursor)=>{
+      cursors.push(cursor);
+      return cursor==='-1'?{users:[],nextCursor:'next',unavailableCount:2}:{users:[],nextCursor,unavailableCount:3};
+    };
+    await c.scan();
+    assert.match(c.getSnapshot().error!,/^SCHEMA:.*cursor/i);assert.deepEqual(cursors,['-1','next']);
+    assert.equal(c.getSnapshot().pages,1);assert.equal(c.getSnapshot().unavailableCount,2);
+    assert.equal(c.getSnapshot().complete,false);assert.deepEqual(c.getSnapshot().rows,[]);assert.deepEqual(adapter.writes,[]);
+  });
+}
+
+test('pausing a pending page ignores its late unavailable count and explicit resume commits that page once',async()=>{
+  const {c,adapter}=await setup(),cursors:string[]=[];
+  let started!:()=>void,release!:(page:FollowingPage)=>void;
+  const ready=new Promise<void>(resolve=>{started=resolve}),reply=new Promise<FollowingPage>(resolve=>{release=resolve});
+  const nextPage:FollowingPage={users:[{id:'2',handle:'bob',name:'Bob'}],nextCursor:'0',unavailableCount:3};
+  adapter.following=async(_actor,cursor)=>{
+    cursors.push(cursor);
+    if(cursor==='-1')return {users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'next',unavailableCount:2};
+    started();return reply;
+  };
+  const running=c.scan();await ready;
+  assert.equal(c.getSnapshot().unavailableCount,2);c.pause();await c.resumeScan();release(nextPage);await running;
+  assert.equal(c.getSnapshot().unavailableCount,2);assert.equal(c.getSnapshot().pages,1);
+  assert.deepEqual(c.getSnapshot().rows.map(row=>row.id),['1']);assert.equal(c.getSnapshot().canResumeScan,true);
+  adapter.following=async(_actor,cursor)=>{cursors.push(cursor);return nextPage;};
+  await c.resumeScan();await c.resumeScan();
+  assert.deepEqual(cursors,['-1','next','next']);assert.equal(c.getSnapshot().unavailableCount,5);
+  assert.equal(c.getSnapshot().pages,2);assert.deepEqual(c.getSnapshot().rows.map(row=>row.id),['1','2']);
+  assert.equal(c.getSnapshot().checked,2);assert.equal(c.getSnapshot().complete,false);assert.equal(c.getSnapshot().canResumeScan,false);
+  assert.deepEqual(adapter.writes,[]);
+});
+
+test('relationship-phase pause and resume preserve the committed unavailable count without rereading Following',async()=>{
+  const {c,adapter}=await setup();let followingCalls=0,relationshipCalls=0,started!:()=>void,release!:(relations:Relation[])=>void;
+  const ready=new Promise<void>(resolve=>{started=resolve}),reply=new Promise<Relation[]>(resolve=>{release=resolve});
+  const known:Relation[]=[{id:'1',following:true,followedBy:false},{id:'2',following:true,followedBy:false}];
+  adapter.following=async()=>{followingCalls++;return {users:[{id:'1',handle:'alice',name:'Alice'},{id:'2',handle:'bob',name:'Bob'}],nextCursor:'0',unavailableCount:4};};
+  adapter.relations=async()=>{relationshipCalls++;started();return reply;};
+  const running=c.scan();await ready;
+  assert.equal(c.getSnapshot().unavailableCount,4);c.pause();release(known);await running;
+  assert.equal(c.getSnapshot().unavailableCount,4);assert.equal(c.getSnapshot().checked,0);assert.equal(c.getSnapshot().canResumeScan,true);
+  adapter.relations=async()=>{relationshipCalls++;return known;};
+  await c.resumeScan();
+  assert.equal(followingCalls,1);assert.equal(relationshipCalls,2);assert.equal(c.getSnapshot().unavailableCount,4);
+  assert.equal(c.getSnapshot().checked,2);assert.equal(c.getSnapshot().complete,false);assert.equal(c.getSnapshot().phase,'ready');
+  assert.deepEqual(adapter.writes,[]);
+});
+
+test('unavailable count initializes to zero and a new scan resets it before its first response',async()=>{
+  const adapter=new Fake(),memory=new Memory(),c=new Controller(adapter,memory,false,0);
+  await c.initialize();assert.equal(c.getSnapshot().unavailableCount,0);
+  adapter.following=async()=>({users:[],nextCursor:'0',unavailableCount:5});await c.scan();
+  assert.equal(c.getSnapshot().unavailableCount,5);
+  let started!:()=>void,release!:(page:FollowingPage)=>void;
+  const ready=new Promise<void>(resolve=>{started=resolve}),reply=new Promise<FollowingPage>(resolve=>{release=resolve});
+  adapter.following=async()=>{started();return reply;};
+  const running=c.scan();await ready;
+  assert.equal(c.getSnapshot().unavailableCount,0);assert.equal(c.getSnapshot().pages,0);assert.equal(c.getSnapshot().complete,false);
+  release({users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'0'});await running;
+  assert.equal(c.getSnapshot().unavailableCount,0);assert.equal(c.getSnapshot().complete,true);assert.deepEqual(adapter.writes,[]);
+});
+
+test('changing accounts on resume clears the previous unavailable count with its paused candidates',async()=>{
+  const {c,adapter}=await setup();
+  adapter.following=async()=>({users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'0',unavailableCount:6});
+  let paused=false;
+  const unsubscribe=c.subscribe(()=>{if(!paused&&c.getSnapshot().phase==='scanning'&&c.getSnapshot().unavailableCount===6){paused=true;c.pause();}});
+  try{await c.scan();}finally{unsubscribe();}
+  assert.equal(c.getSnapshot().unavailableCount,6);assert.equal(c.getSnapshot().canResumeScan,true);
+  adapter.changed=true;await c.resumeScan();
+  assert.match(c.getSnapshot().error!,/^ACCOUNT_CHANGED:/);assert.equal(c.getSnapshot().unavailableCount,0);
+  assert.deepEqual(c.getSnapshot().rows,[]);assert.equal(c.getSnapshot().pages,0);assert.equal(c.getSnapshot().complete,false);
+  assert.equal(c.getSnapshot().canResumeScan,false);
+  assert.deepEqual(adapter.writes,[]);
+});
+
+test('clearing local data resets the unavailable count and cannot restore it through resume',async()=>{
+  const {c,adapter}=await setup();
+  adapter.following=async()=>({users:[{id:'1',handle:'alice',name:'Alice'}],nextCursor:'0',unavailableCount:6});
+  let paused=false;
+  const unsubscribe=c.subscribe(()=>{if(!paused&&c.getSnapshot().phase==='scanning'&&c.getSnapshot().unavailableCount===6){paused=true;c.pause();}});
+  try{await c.scan();}finally{unsubscribe();}
+  assert.equal(c.getSnapshot().unavailableCount,6);assert.equal(c.getSnapshot().canResumeScan,true);
+  await c.clearLocalData();await c.resumeScan();
+  assert.equal(c.getSnapshot().unavailableCount,0);assert.deepEqual(c.getSnapshot().rows,[]);assert.equal(c.getSnapshot().account,null);
+  assert.equal(c.getSnapshot().canResumeScan,false);assert.equal(c.getSnapshot().complete,false);assert.deepEqual(adapter.writes,[]);
 });

@@ -5,7 +5,7 @@ import type { Language } from '../src/types';
 
 const requiredLanguages = ['zh-CN', 'en', 'fr', 'es', 'ru', 'de', 'pt', 'ja', 'ko', 'ar'];
 const requiredMessages = [
-  'demoBanner', 'connect', 'scan', 'manual', 'automatic', 'autoDescription', 'unknownHelp',
+  'demoBanner', 'connect', 'scan', 'manual', 'automatic', 'autoDescription', 'unknownHelp', 'scanFinishedPartial', 'unavailableHelp',
   'whitelistDescription', 'manualConfirmDescription', 'previewDescription', 'pacingHint',
   'freeFooter', 'followAuthor', 'authorDescription', 'authorSelf', 'statusConnected', 'statusDone',
   'statusSkipped', 'statusUnfollowed', 'statusAuthorFollowed', 'statusWhitelistSaved',

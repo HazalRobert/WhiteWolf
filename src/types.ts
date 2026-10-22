@@ -3,7 +3,7 @@ export type Mode = 'manual' | 'auto';
 export interface Account { id: string; handle: string; name: string; }
 export interface Person extends Account { avatar?: string; bio?: string; }
 export interface Relation { id: string; following: boolean | null; followedBy: boolean | null; }
-export interface FollowingPage { users: Person[]; nextCursor: string; relations?: Relation[]; }
+export interface FollowingPage { users: Person[]; nextCursor: string; relations?: Relation[]; unavailableCount?: number; }
 export type Outcome = 'pending' | 'unfollowed' | 'skipped' | 'uncertain';
 export interface Row extends Person { relation: Relation; outcome: Outcome; }
 export interface WhiteEntry { id?: string; handle: string; }
@@ -17,6 +17,7 @@ export interface AppState {
   currentId: string | null; logs: AuditEntry[]; authorFollowed: boolean;
   activeOperation?: 'scan' | 'auto' | 'manual' | 'author' | null;
   pausePending?: boolean; canResumeScan?: boolean;
+  unavailableCount?: number;
 }
 export interface Adapter {
   setSessionLostListener?(listener: (message: string) => void): void;

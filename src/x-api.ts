@@ -238,7 +238,7 @@ export function xPageRuntime(input: RuntimeInput): RuntimeResult | Promise<Runti
         for(const relation of result.relations)lease!.relations.set(relation.id,relation);
         // Keep the same read-only page evidence with the controller checkpoint.
         // A paused scan reconnects with a new lease, whose local cache starts empty.
-        return { ok: true, data: {users:result.users,nextCursor:result.nextCursor,relations:result.relations} };
+        return { ok: true, data: {users:result.users,nextCursor:result.nextCursor,relations:result.relations,...(result.unavailableCount?{unavailableCount:result.unavailableCount}:{})} };
       }
       if (operation.kind === 'relations') {
         if (operation.ids.length < 1 || operation.ids.length > 100) return fail('SCHEMA', 'Relationship lookup requires 1–100 IDs.');
