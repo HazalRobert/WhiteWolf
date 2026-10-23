@@ -2,13 +2,18 @@ import { isWhitelisted, type PageOperation, type RuntimeInput, type RuntimeResul
 import type { Account, Person } from './types';
 
 const bootId = crypto.randomUUID();
-type Owner = { port: chrome.runtime.Port; sessionId: string; tabId: number; actorId: string | null; cancelled: boolean; busy: boolean; requiresHostPermission: boolean; pageStarted: boolean; navigating: boolean };
+type Owner = { port: chrome.runtime.Port; sessionId: string; tabId: number; actorId: string | null; cancelled: boolean; busy: boolean; requiresHostPermission: boolean; pageStarted: boolean;
+  /** Set from a `loading` event until a lease probe confirms the same document; writes wait for it. */
+  navigating: boolean; navigation: number; settled: (() => void)[] };
 let owner: Owner | null = null;
 let windowId: number | null = null;
 let opening: Promise<void> = Promise.resolve();
 const isX = (url: string | undefined): boolean => { try { return new URL(url ?? '').origin === 'https://x.com'; } catch { return false; } };
 const xOrigin = 'https://x.com/*';
 const NAVIGATED = 'TAB_REQUIRED: The selected X page reloaded or navigated. Reconnect after it finishes loading.';
+// The X tab last connected from a control page, kept for this browser session across worker restarts.
+const BINDING_KEY = 'whitewolf_control_binding_v1';
+type Binding = { controlTabId: number; xTabId: number };
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
@@ -78,15 +83,45 @@ async function leaseIntact(session: Owner): Promise<boolean> {
 }
 
 /** Same-document X navigation keeps the page lease; a replaced document or lost access ends the session. */
-async function probeAfterNavigation(session: Owner): Promise<void> {
+async function probeAfterNavigation(session: Owner, navigation: number): Promise<void> {
   const intact = await leaseIntact(session);
-  if (!intact && owner === session && !session.cancelled) endSession(session, NAVIGATED);
+  if (owner !== session || session.cancelled) return;
+  if (!intact) { endSession(session, NAVIGATED); return; }
+  // A newer navigation started while probing; its own completion decides.
+  if (navigation !== session.navigation) return;
+  session.navigating = false;
+  session.settled.splice(0).forEach(release => release());
+}
+
+/** Writes never start while the selected page may be replaced; nothing is sent if it does not settle. */
+async function settledForWrite(session: Owner): Promise<void> {
+  if (session.navigating) {
+    await new Promise<void>(resolve => {
+      const release = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => { const index = session.settled.indexOf(release); if (index >= 0) session.settled.splice(index, 1); resolve(); }, 15_000);
+      session.settled.push(release);
+    });
+  }
+  if (owner !== session || session.cancelled) throw new Error('CANCELLED: The control session ended before the write was sent.');
+  if (session.navigating) throw new Error(NAVIGATED);
+}
+
+async function rememberBinding(binding: Binding): Promise<void> {
+  try { await chrome.storage.session.set({ [BINDING_KEY]: binding }); } catch { /* best effort; the URL declaration still applies */ }
+}
+async function boundTab(controlTabId: number): Promise<number | null> {
+  try {
+    const value = (await chrome.storage.session.get(BINDING_KEY))[BINDING_KEY] as Partial<Binding> | undefined;
+    return value?.controlTabId === controlTabId && Number.isSafeInteger(value.xTabId) ? value.xTabId! : null;
+  } catch { return null; }
 }
 
 function stop(session: Owner): void {
   if (session.cancelled) return;
   session.cancelled = true;
   if (owner === session) owner = null;
+  // Waiting writes resume only to observe the ended session; none of them is sent.
+  session.settled.splice(0).forEach(release => release());
   // Cancellation is best effort after a page command started. Revoking access cannot
   // retract an in-flight request, and may prevent this cancellation injection too.
   if (session.pageStarted) void execute(session, { kind: 'cancel' }).catch(() => {});
@@ -144,12 +179,14 @@ chrome.runtime.onConnect.addListener(port => {
           if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId) || tabId < 0) throw new Error('TAB_REQUIRED: Select an open https://x.com tab before connecting.');
           if (owner) endSession(owner, 'CANCELLED: This control session was replaced by another connection. Reconnect explicitly.');
           session = { port, sessionId: crypto.randomUUID(), tabId, actorId: null, cancelled: false, busy: true,
-            requiresHostPermission: declaredTab !== String(tabId), pageStarted: false, navigating: false };
+            requiresHostPermission: declaredTab !== String(tabId), pageStarted: false, navigating: false, navigation: 0, settled: [] };
           owner = session;
           const account = await execute(session, { kind: 'connect' }) as Account;
           if (owner !== session || session.cancelled) throw new Error('CANCELLED: Connection was replaced.');
           session.actorId = account.id;
           session.busy = false;
+          const controlTabId = port.sender?.tab?.id;
+          if (typeof controlTabId === 'number') void rememberBinding({ controlTabId, xTabId: tabId });
           respond(requestId, { ok: true, data: account, bootId, sessionId: session.sessionId });
           return;
         }
@@ -167,13 +204,18 @@ chrome.runtime.onConnect.addListener(port => {
         try {
           let data: unknown;
           if (operation.kind === 'unfollow') {
+            await settledForWrite(current);
             const prepared = await execute(current, { kind: 'prepareUnfollow', actorId: operation.actorId, targetId: operation.targetId }) as { target: Person; proofId: string };
             if (operation.automatic) {
               const stored = await chrome.storage.local.get('reciprocal_data');
               if (isWhitelisted(stored.reciprocal_data, operation.actorId, prepared.target)) throw new Error('SKIPPED: This account is on the latest whitelist.');
             }
             if (owner !== current || current.cancelled) throw new Error('CANCELLED: Paused before the write was sent.');
+            await settledForWrite(current);
             data = await execute(current, { ...operation, proofId: prepared.proofId });
+          } else if (operation.kind === 'followAuthor') {
+            await settledForWrite(current);
+            data = await execute(current, operation);
           } else data = await execute(current, operation);
           respond(requestId, { ok: true, data, bootId, sessionId: current.sessionId });
         } finally { current.busy = false; }
@@ -199,8 +241,8 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   if ((change.url !== undefined && !isX(change.url)) || (change.status === 'loading' && !session.actorId)) { disconnectOwner(NAVIGATED); return; }
   // X is a single-page app: in-app links and history updates also report loading. Keep the session and
   // verify the lease when loading completes; a reload or cross-document navigation leaves no lease behind.
-  if (change.status === 'loading') session.navigating = true;
-  else if (change.status === 'complete' && session.navigating) { session.navigating = false; void probeAfterNavigation(session); }
+  if (change.status === 'loading') { session.navigation++; session.navigating = true; }
+  else if (change.status === 'complete' && session.navigating) void probeAfterNavigation(session, session.navigation);
 });
 chrome.permissions.onRemoved.addListener(permissions => {
   if (permissions.origins?.includes(xOrigin) && owner) {
@@ -230,9 +272,12 @@ chrome.action.onClicked.addListener(tab => {
       const control = controls.find(context => context.tabId === controlTabs[0])!;
       let declared: string | null = null;
       try { declared = new URL(control.documentUrl!).searchParams.get('tab'); } catch { /* replace below */ }
-      // A repeated click on the bound tab, or a click from another site, keeps the open page and its scan.
+      // The page may have connected another tab through its picker; the live session or its recorded binding knows it.
+      const connected = owner && owner.port.sender?.tab?.id === control.tabId ? owner.tabId : await boundTab(control.tabId);
+      const bound = new Set([declared, connected === null ? null : String(connected)].filter(Boolean));
+      // A repeated click on a bound tab, or a click from another site, keeps the open page and its scan.
       // A click from a different X tab is an explicit choice of that tab and replaces the page.
-      if ((!clickedX || declared === String(tab.id)) && await focusControl(control)) return;
+      if ((!clickedX || bound.has(String(tab.id))) && await focusControl(control)) return;
     }
     if (owner) endSession(owner, 'CANCELLED: A new control window replaced this connection. Reconnect explicitly.');
     windowId = null;

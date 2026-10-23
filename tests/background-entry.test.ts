@@ -22,7 +22,8 @@ function deferred<T>() {
 type Message = Record<string, unknown>;
 type Injection = { target: { tabId: number }; files?: string[]; args?: [{ type: string; operation: { kind: string } }]; func?: (input: unknown) => unknown };
 type Control = { tabId: number; windowId: number; documentUrl: string };
-function worker(options: { granted?: boolean; url?: string | null; closed?: boolean; storedData?: unknown; controls?: Control[]; minimized?: boolean; focusFails?: boolean } = {}) {
+type Timers = { setTimeout: (callback: () => void, ms: number) => unknown; clearTimeout: (handle: unknown) => void };
+function worker(options: { granted?: boolean; url?: string | null; closed?: boolean; storedData?: unknown; controls?: Control[]; minimized?: boolean; focusFails?: boolean; timers?: Timers } = {}) {
   const onConnect = event<[MockPort]>(), onRemoved = event<[number]>();
   const onUpdated = event<[number, { status?: string; url?: string }]>();
   const permissionRemoved = event<[{ origins?: string[] }]>();
@@ -31,6 +32,7 @@ function worker(options: { granted?: boolean; url?: string | null; closed?: bool
   const tabReads: number[] = [];
   const windowCalls: unknown[][] = [], removedTabs: number[] = [];
   const onClicked = event<[{ id?: number; url?: string }]>();
+  const sessionStore: Record<string, unknown> = {};
   let sequence = 0;
   let getTab: (tabId: number) => Promise<{ id: number; url?: string }> = async tabId => {
     if (options.closed) throw new Error('Synthetic closed tab');
@@ -42,7 +44,9 @@ function worker(options: { granted?: boolean; url?: string | null; closed?: bool
   const chrome = {
     runtime: { id: 'synthetic-extension', getURL: (file: string) => `chrome-extension://synthetic-extension/${file}`,
       onConnect, getContexts: async () => options.controls ?? [] },
-    storage: { local: { setAccessLevel: async () => {}, get: async () => ({ reciprocal_data: options.storedData }) }, session: { setAccessLevel: async () => {} } },
+    storage: { local: { setAccessLevel: async () => {}, get: async () => ({ reciprocal_data: options.storedData }) },
+      session: { setAccessLevel: async () => {}, get: async (key: string) => (key in sessionStore ? { [key]: structuredClone(sessionStore[key]) } : {}),
+        set: async (value: Record<string, unknown>) => { Object.assign(sessionStore, structuredClone(value)); } } },
     permissions: { contains: async (details: unknown) => { permissionChecks.push(details); return permission(); }, onRemoved: permissionRemoved },
     tabs: { get: (tabId: number) => { tabReads.push(tabId); return getTab(tabId); }, remove: async (tabId: number) => { removedTabs.push(tabId); },
       update: async (tabId: number, value: unknown) => { windowCalls.push(['tabs.update', tabId, value]); }, onRemoved, onUpdated },
@@ -53,16 +57,17 @@ function worker(options: { granted?: boolean; url?: string | null; closed?: bool
     action: { onClicked },
   };
   // The page function is serialized by Chrome; here it runs against an empty synthetic window.
-  runInNewContext(compiled, { chrome, URL, crypto: { randomUUID: () => `synthetic-${++sequence}` }, window: {} });
+  const timers = options.timers ?? { setTimeout: (callback: () => void, ms: number) => setTimeout(callback, ms), clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
+  runInNewContext(compiled, { chrome, URL, crypto: { randomUUID: () => `synthetic-${++sequence}` }, window: {}, structuredClone, ...timers });
   class MockPort {
     name = 'reciprocal-x-control-v1';
-    sender: { id: string; url: string };
+    sender: { id: string; url: string; tab?: { id: number } };
     onMessage = event<[Message]>();
     onDisconnect = event<[]>();
     messages: Message[] = [];
     messagesAtDisconnect: Message[] | null = null;
     disconnected = false;
-    constructor(url: string) { this.sender = { id: 'synthetic-extension', url }; }
+    constructor(url: string, controlTabId = 7) { this.sender = { id: 'synthetic-extension', url, tab: { id: controlTabId } }; }
     postMessage(message: Message) { if (this.disconnected) throw new Error('Closed synthetic port'); this.messages.push(message); }
     disconnect() { if (!this.disconnected) { this.messagesAtDisconnect = [...this.messages]; this.disconnected = true; this.onDisconnect.emit(); } }
     send(message: Message) { this.onMessage.emit(message); }
@@ -71,7 +76,7 @@ function worker(options: { granted?: boolean; url?: string | null; closed?: bool
       throw new Error(`No synthetic worker reply for ${id}`);
     }
   }
-  return { injections, permissionChecks, tabReads, permissionRemoved, onRemoved, onUpdated, onClicked, windowCalls, removedTabs,
+  return { injections, permissionChecks, tabReads, permissionRemoved, onRemoved, onUpdated, onClicked, windowCalls, removedTabs, sessionStore,
     permission: (callback: typeof permission) => { permission = callback; },
     getTab: (callback: typeof getTab) => { getTab = callback; },
     script: (callback: typeof script) => { script = callback; },
@@ -427,11 +432,13 @@ test('a read interrupted by an in-progress navigation reports TAB_REQUIRED inste
   assert.match(String(reply.error), /^TAB_REQUIRED: The selected X page reloaded or navigated/);assert.equal(reply.sessionEnded, true);
 });
 
-test('a write interrupted by navigation remains UNCERTAIN', async () => {
-  const { w, port, lease } = await connectedWorker();
-  w.onUpdated.emit(41, { status: 'loading' });
-  w.script(async () => { throw new Error('Synthetic frame replaced'); });
+test('a write whose page is replaced after it was dispatched remains UNCERTAIN', async () => {
+  const { w, port, lease } = await connectedWorker(), dispatched = deferred<void>(), result = deferred<unknown[]>();
+  w.script(async details => { if (details.args?.[0].operation.kind === 'followAuthor') { dispatched.resolve(); return result.promise; } return [{ result: { ok: true, data: null } }]; });
   port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'followAuthor', actorId: account.id } });
+  await dispatched.promise;
+  w.onUpdated.emit(41, { status: 'loading' });
+  result.resolve([{ result: undefined }]);
   assert.match(String((await port.reply('write')).error), /^UNCERTAIN:/);
 });
 
@@ -510,13 +517,122 @@ test('a read without a result while the page lease is intact remains a schema fa
 });
 
 for (const navigating of [false, true]) {
-  test(`a write without a page result is UNCERTAIN${navigating ? ' during navigation' : ''} and never probed as a read`, async () => {
+  test(`a write without a page result is UNCERTAIN${navigating ? ' when navigation starts after dispatch' : ''} and never probed as a read`, async () => {
     const { w, port, lease } = await connectedWorker();
-    if (navigating) w.onUpdated.emit(41, { status: 'loading' });
-    w.script(async details => details.args?.[0].operation.kind === 'followAuthor' ? [{ result: undefined }] : [{ result: { ok: true, data: null } }]);
+    w.script(async details => { if (details.args?.[0].operation.kind !== 'followAuthor') return [{ result: { ok: true, data: null } }]; if (navigating) w.onUpdated.emit(41, { status: 'loading' }); return [{ result: undefined }]; });
     port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'followAuthor', actorId: account.id } });
     const reply = await port.reply('write');
     assert.match(String(reply.error), /^UNCERTAIN:/);assert.equal(reply.sessionEnded, true);
     assert.equal(w.injections.some(injection => injection.args?.[0].operation.kind === 'probe'), false);
   });
 }
+
+test('a write requested during navigation waits for the lease probe, then proceeds in the same document', async () => {
+  const { w, port, lease } = await connectedWorker();
+  w.script(async details => [{ result: { ok: true, data: details.args?.[0].operation.kind === 'probe' ? true : null } }]);
+  w.onUpdated.emit(41, { status: 'loading', url: 'https://x.com/notifications' });
+  port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'followAuthor', actorId: account.id } });
+  await settle();
+  assert.equal(w.injections.some(injection => injection.args?.[0].operation.kind === 'followAuthor'), false);
+  w.onUpdated.emit(41, { status: 'complete' });
+  assert.equal((await port.reply('write')).ok, true);
+  const kinds = w.injections.map(injection => injection.args?.[0].operation.kind).filter(Boolean);
+  assert.ok(kinds.indexOf('probe') < kinds.indexOf('followAuthor'));
+});
+
+test('a write requested during a reload is never sent when the page lease disappears', async () => {
+  const { w, port, lease } = await connectedWorker();
+  w.script(async details => [{ result: { ok: true, data: details.args?.[0].operation.kind === 'probe' ? false : null } }]);
+  w.onUpdated.emit(41, { status: 'loading' });
+  port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'followAuthor', actorId: account.id } });
+  await settle();
+  w.onUpdated.emit(41, { status: 'complete' });
+  await settle();
+  // The session ends before the waiting write resumes; the control page treats that pending write conservatively.
+  assert.equal(port.disconnected, true);
+  assert.match(String(port.messages.find(message => message.type === 'SESSION_ENDED')?.error), /^TAB_REQUIRED: The selected X page reloaded or navigated/);
+  assert.equal(w.injections.some(injection => injection.args?.[0].operation.kind === 'followAuthor'), false);
+});
+
+test('a write whose navigation never settles ends the session without sending anything', async () => {
+  const pending: { callback: () => void; ms: number }[] = [];
+  const timers: Timers = { setTimeout: (callback, ms) => { const timer = { callback, ms }; pending.push(timer); return timer; },
+    clearTimeout: handle => { const index = pending.indexOf(handle as { callback: () => void; ms: number }); if (index >= 0) pending.splice(index, 1); } };
+  const { w, port, lease } = await connectedWorker({ timers });
+  w.onUpdated.emit(41, { status: 'loading' });
+  port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'followAuthor', actorId: account.id } });
+  await settle();
+  const wait = pending.find(timer => timer.ms === 15_000);
+  assert.ok(wait, 'The write must wait on a bounded timer.');
+  wait!.callback();
+  const reply = await port.reply('write');
+  assert.match(String(reply.error), /^TAB_REQUIRED: The selected X page reloaded or navigated/);assert.equal(reply.sessionEnded, true);
+  assert.equal(w.injections.some(injection => injection.args?.[0].operation.kind === 'followAuthor'), false);
+});
+
+test('navigation between the fresh check and the write makes the write wait for the probe', async () => {
+  const preparing = deferred<void>(), prepared = deferred<unknown[]>();
+  const { w, port, lease } = await connectedWorker();
+  w.script(async details => {
+    const kind = details.args?.[0].operation.kind;
+    if (kind === 'prepareUnfollow') { preparing.resolve(); return prepared.promise; }
+    return [{ result: { ok: true, data: kind === 'probe' ? true : kind === 'unfollow' ? { verified: true } : null } }];
+  });
+  port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'unfollow', actorId: account.id, targetId: '2' } });
+  await preparing.promise;
+  w.onUpdated.emit(41, { status: 'loading', url: 'https://x.com/explore' });
+  prepared.resolve([{ result: { ok: true, data: { target: { id: '2', handle: 'synthetic_peer', name: 'Peer' }, proofId: 'synthetic-proof' } } }]);
+  await settle();
+  assert.equal(w.injections.some(injection => injection.args?.[0].operation.kind === 'unfollow'), false);
+  w.onUpdated.emit(41, { status: 'complete' });
+  assert.equal((await port.reply('write')).ok, true);
+  assert.equal(w.injections.filter(injection => injection.args?.[0].operation.kind === 'unfollow').length, 1);
+});
+
+test('a probe from an earlier navigation cannot settle a newer navigation', async () => {
+  const probes: ReturnType<typeof deferred<unknown[]>>[] = [];
+  const { w, port, lease } = await connectedWorker();
+  w.script(async details => { if (details.args?.[0].operation.kind === 'probe') { const reply = deferred<unknown[]>(); probes.push(reply); return reply.promise; } return [{ result: { ok: true, data: null } }]; });
+  w.onUpdated.emit(41, { status: 'loading' });w.onUpdated.emit(41, { status: 'complete' });
+  await settle();
+  w.onUpdated.emit(41, { status: 'loading' });
+  port.send({ type: 'COMMAND', id: 'write', ...lease, operation: { kind: 'followAuthor', actorId: account.id } });
+  probes[0].resolve([{ result: { ok: true, data: true } }]);
+  await settle();
+  assert.equal(w.injections.some(injection => injection.args?.[0].operation.kind === 'followAuthor'), false);
+  w.onUpdated.emit(41, { status: 'complete' });await settle();
+  probes[1].resolve([{ result: { ok: true, data: true } }]);
+  assert.equal((await port.reply('write')).ok, true);
+});
+
+test('a page connected through the tab picker is focused when the toolbar is clicked on that tab', async () => {
+  const w = worker({ granted: true, controls: [control(7, null)] }), port = w.port(`${page}?reason=open-from-x`);
+  port.send({ type: 'CONNECT', id: 'connect', tabId: 41 });
+  assert.equal((await port.reply('connect')).ok, true);await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(w.sessionStore)), { whitewolf_control_binding_v1: { controlTabId: 7, xTabId: 41 } });
+  w.onClicked.emit({ id: 41, url: 'https://x.com/home' });await settle();
+  assert.deepEqual(w.removedTabs, []);assert.equal(port.disconnected, false);
+  assert.equal(w.windowCalls.some(call => call[0] === 'create'), false);
+});
+
+test('the recorded binding still focuses the page after its session ended, for example while waiting out a rate limit', async () => {
+  const w = worker({ granted: true, controls: [control(7, null)] }), port = w.port(`${page}?reason=open-from-x`);
+  port.send({ type: 'CONNECT', id: 'connect', tabId: 41 });
+  const connected = await port.reply('connect');await settle();
+  w.script(async () => [{ result: { ok: false, error: 'RATE_LIMIT: Following GET: HTTP 429; automatic retry is disabled.' } }]);
+  port.send({ type: 'COMMAND', id: 'limited', bootId: connected.bootId, sessionId: connected.sessionId, operation: { kind: 'following', actorId: account.id, cursor: '-1' } });
+  assert.match(String((await port.reply('limited')).error), /^RATE_LIMIT:/);
+  w.onClicked.emit({ id: 41, url: 'https://x.com/home' });await settle();
+  assert.deepEqual(w.removedTabs, []);assert.equal(w.windowCalls.some(call => call[0] === 'create'), false);
+  w.onClicked.emit({ id: 42, url: 'https://x.com/home' });await settle();
+  assert.deepEqual(w.removedTabs, [7]);assert.equal(w.windowCalls.filter(call => call[0] === 'create').length, 1);
+});
+
+test('a binding recorded for another control page never focuses a different one', async () => {
+  const w = worker({ granted: true, controls: [control(8, null)] }), port = w.port(`${page}?reason=open-from-x`);
+  port.send({ type: 'CONNECT', id: 'connect', tabId: 41 });
+  assert.equal((await port.reply('connect')).ok, true);await settle();
+  port.disconnect();
+  w.onClicked.emit({ id: 41, url: 'https://x.com/home' });await settle();
+  assert.deepEqual(w.removedTabs, [8]);assert.equal(w.windowCalls.filter(call => call[0] === 'create').length, 1);
+});

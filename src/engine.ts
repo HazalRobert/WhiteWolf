@@ -230,7 +230,7 @@ export class Controller implements Actions {
     this.assertActive();const actor=this.actor();const row=this.state.rows.find(r=>r.id===id);
     if(!row||!isCandidate(row))return;
     if(this.unresolvedIds(actor.id).has(id)){this.updateRow(id,{outcome:'uncertain'});return;}
-    if(automatic&&isWhitelisted(row,this.state.whitelist))return;
+    if(automatic&&(isWhitelisted(row,this.state.whitelist)||row.manualOnly))return;
     this.patch({currentId:id});
     await this.adapter.identity(actor.id);this.assertActive();
     const relations=await this.adapter.relations(actor.id,[id]);this.assertActive();
@@ -264,13 +264,13 @@ export class Controller implements Actions {
     if(!fresh||typeof fresh.following!=='boolean'||typeof fresh.followedBy!=='boolean')throw new Error('SCHEMA: Current relationship unknown');
     if(!fresh.following){this.updateRow(id,{relation:fresh,outcome:'unfollowed'});await this.audit(row,'unfollow','verified');this.patch({message:'statusRecheckUnfollowed'});}
     else if(fresh.followedBy){this.updateRow(id,{relation:fresh,outcome:'skipped'});await this.audit(row,'unfollow','skipped');this.patch({message:'statusSkipped'});}
-    else{this.updateRow(id,{relation:fresh,outcome:'pending'});await this.audit(row,'unfollow','rechecked');this.patch({message:'statusRechecked'});}
+    else{this.updateRow(id,{relation:fresh,outcome:'pending',manualOnly:true});await this.audit(row,'unfollow','rechecked');this.patch({message:'statusRechecked'});}
     if(!this.stopped)this.patch({phase:'ready'});
   },'manual');};
   startAuto=async()=>{if(this.scanCheckpoint)return;await this.run(async()=>{
     if(!isAutoReady(this.state))throw new Error('INCOMPLETE: Complete a scan before automatic mode');
     await this.bind();await this.persist();this.assertActive();
-    const queue=this.state.rows.filter(r=>isCandidate(r)&&!isWhitelisted(r,this.state.whitelist)).slice(0,this.state.settings.batchLimit).map(r=>r.id);
+    const queue=this.state.rows.filter(r=>isCandidate(r)&&!r.manualOnly&&!isWhitelisted(r,this.state.whitelist)).slice(0,this.state.settings.batchLimit).map(r=>r.id);
     this.patch({phase:'running',message:'statusRunning',runProgress:{total:queue.length,processed:0,nextAt:null}});
     for(let i=0;i<queue.length;i++){
       this.assertActive();await this.perform(queue[i],true);this.assertActive();

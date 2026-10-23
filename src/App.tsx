@@ -173,7 +173,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
   const nonMutual = state.rows.filter(row => isNonMutual(row) && row.outcome !== 'unfollowed');
   const unknown = state.rows.filter(row => row.outcome !== 'unfollowed' && (row.relation.following === null || row.relation.followedBy === null));
   const uncertainRows = state.rows.filter(row => row.outcome === 'uncertain');
-  const eligible = nonMutual.filter(row => row.outcome === 'pending' && !protectedRow(row));
+  const eligible = nonMutual.filter(row => row.outcome === 'pending' && !row.manualOnly && !protectedRow(row));
   const completed = state.rows.filter(row => row.outcome === 'unfollowed').length;
   const isAuthorAccount = state.account?.handle.replace(/^@/, '').toLowerCase() === 'magicalstocker';
   const autoReady = isAutoReady(state);
@@ -430,7 +430,8 @@ export default function App({ state, actions, connection }: { state: AppState; a
             const uncertain = row.outcome === 'uncertain';
             const handle = bareHandle(row.handle);
             const actionable = isNonMutual(row) && row.outcome === 'pending' && state.connected && !busy && !scanPaused && !active;
-            const recheckable = uncertain && state.connected && !busy && !scanPaused && !active;
+            // Recheck only reads; like Resume scan, it reconnects to the selected tab itself.
+            const recheckable = uncertain && !busy && !scanPaused && !active;
             return <article className={`person-row ${done ? 'person-done' : ''} ${uncertain ? 'person-uncertain' : ''} ${active ? 'person-active' : ''} ${white && mode === 'auto' ? 'person-protected' : ''}`} key={row.id}>
               <Avatar row={row} label={`${tr('profile')} @${handle}`} />
               <div className="person-copy"><div className="person-name"><a href={`https://x.com/${encodeURIComponent(handle)}`} target="_blank" rel="noreferrer"><span>{row.name || row.handle}</span><ExternalLink size={14} /></a>{white && mode === 'auto' && <span className="protected-mark" title={tr('whitelisted')}><ShieldCheck size={17} /></span>}</div><span className="person-handle" dir="ltr">@{handle}</span></div>

@@ -209,6 +209,23 @@ test('recheck releases a still-followed uncertain row to pending with one fresh 
   await c.unfollow('1');assert.deepEqual(adapter.writes,['1']);assert.equal(c.getSnapshot().rows[0].outcome,'unfollowed');
 });
 
+test('a rechecked account stays out of automatic runs until the next scan but remains manually actionable',async()=>{
+  const {c,adapter,memory}=await uncertainRow();
+  await c.recheck('1');
+  assert.equal(c.getSnapshot().rows[0].manualOnly,true);assert.deepEqual(memory.data.unresolved['999'],[]);
+  c.setPacing(5,5);await c.startAuto();
+  assert.deepEqual(adapter.writes,['2']);assert.equal(c.getSnapshot().rows[0].outcome,'pending');
+  await c.unfollow('1');assert.deepEqual(adapter.writes,['2','1']);assert.equal(c.getSnapshot().rows[0].outcome,'unfollowed');
+});
+
+test('a new scan clears the manual-only mark of a rechecked account',async()=>{
+  const {c,adapter}=await uncertainRow();
+  await c.recheck('1');assert.equal(c.getSnapshot().rows[0].manualOnly,true);
+  await c.scan();
+  assert.equal(c.getSnapshot().rows[0].manualOnly,undefined);assert.equal(c.getSnapshot().rows[0].outcome,'pending');
+  c.setPacing(5,1);await c.startAuto();assert.deepEqual(adapter.writes,['1']);
+});
+
 test('recheck confirms an uncertain unfollow that actually reached X',async()=>{
   const {c,adapter,memory}=await uncertainRow();
   adapter.lookup=async ids=>ids.map(id=>({id,following:false,followedBy:false}));

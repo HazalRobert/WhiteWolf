@@ -158,8 +158,10 @@ try {
     assert.equal(fixture.state.abortedWrites.length, 1); assert.equal(fixture.writes.length, before);
     await capture('uncertain-row-recheck');
     fixture.state.failWrite = false;
-    await ui.getByRole('button', { name: '连接 X 账号', exact: true }).first().click(); await ui.locator('.connected-indicator').waitFor();
+    // Recheck reconnects by itself after the uncertain write ended the session.
+    assert.equal(await ui.locator('.connected-indicator').count(), 0);
     await chen.getByRole('button', { name: '重新核实', exact: true }).click();
+    await ui.locator('.connected-indicator').waitFor();
     await chen.getByRole('button', { name: '取消关注', exact: true }).waitFor({ timeout: 15000 });
     assert.equal(fixture.writes.length, before);
     await chen.getByRole('button', { name: '取消关注', exact: true }).click(); await ui.locator('dialog .button-danger').click();

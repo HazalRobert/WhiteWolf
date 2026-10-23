@@ -5,7 +5,8 @@ export interface Person extends Account { avatar?: string; bio?: string; }
 export interface Relation { id: string; following: boolean | null; followedBy: boolean | null; }
 export interface FollowingPage { users: Person[]; nextCursor: string; relations?: Relation[]; unavailableCount?: number; }
 export type Outcome = 'pending' | 'unfollowed' | 'skipped' | 'uncertain';
-export interface Row extends Person { relation: Relation; outcome: Outcome; }
+/** `manualOnly` marks an uncertain outcome released by a recheck; it needs a new manual confirmation until the next scan. */
+export interface Row extends Person { relation: Relation; outcome: Outcome; manualOnly?: boolean; }
 export interface WhiteEntry { id?: string; handle: string; }
 export interface Settings { language: Language; mode: Mode; intervalSeconds: number; batchLimit: number; }
 export interface AuditEntry { at: string; actorId: string; targetId: string; handle: string; action: 'unfollow' | 'follow-author'; result: string; }
