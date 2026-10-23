@@ -1,3 +1,58 @@
+# WhiteWolf 1.3 — Unreleased internal test build
+
+Status: **not published.** This entry describes the source on the development branch for the maintainer's own acceptance testing. The public download and README remain at 1.2.4 until 1.3 is approved. Manifest version `1.3`; package version `1.3.0`.
+
+## Stability
+
+- **In-app X navigation no longer ends the session.** Chrome reports `status: loading` for same-document navigation in the connected X tab (links, `pushState`, `replaceState` and hash changes were verified on Chrome 153). 1.2.4 ended the control session on every such event and discarded the scan in progress. 1.3 keeps the session and, when loading completes, checks that the page lease still exists. A reload, cross-document navigation, leaving x.com or lost access still ends the session. Any navigation during CONNECT still cancels the connection.
+- **Interrupted scans resume instead of restarting.** A rate limit, network or HTTP failure, sign-in challenge, page reload, closed tab, lost permission, worker restart or replaced connection now keeps the pages already read. **Resume scan** reconnects, verifies the same account and continues from the first unread page or relationship batch. Account changes, clearing local data, data-integrity errors (`SCHEMA`, `INCOMPLETE`) and interruptions before any page was read still discard the checkpoint. A failed whitelist addition no longer discards a paused scan.
+- **Lost page results are classified safely.** A page command whose X document disappeared now reports a navigation for reads and `UNCERTAIN` for writes. Previously a write in that state could be recorded as a schema stop, which would have removed its no-replay protection.
+- **Rate limits show X's reset time** when X reports `x-rate-limit-reset`. Nothing is retried automatically.
+- **Whitelist lookups for unknown or suspended usernames** report "not found" without disconnecting. Nothing is saved and the typed text is kept for correction.
+- **Uncertain outcomes can be rechecked.** One fresh read resolves an "Outcome uncertain" account: unfollowed → confirmed; follows back → skipped; still followed and not following back → returned to pending for a new explicit confirmation. Rechecking never writes. In 1.2.4 the only way out of this state was clearing all local data.
+- **Clicking the toolbar icon again keeps the open control window.** From the bound X tab or from another site, the click focuses the existing window instead of closing it and losing its scan. A click from a different X tab still opens a window bound to that tab.
+- **Interval and batch fields accept natural typing.** Valid values apply immediately; anything else is clamped on Enter or blur. 1.2.4 clamped every keystroke, so typing "30" into the interval produced 50.
+- While any whitelist lookup runs, other actions are disabled instead of being silently ignored by the engine.
+
+## Interface
+
+- Redesigned interface built on design tokens: refined typography and spacing, an overview with integrated scan status, stat tiles with a non-follower ratio ring, a progress meter, skeleton loading rows, a segmented mode control, refined list rows, dialogs and theme editor.
+- Follows the system dark mode. Light and dark palettes were checked at 4.5:1 or higher for all measured text roles. Animations respect reduced-motion settings.
+- Scan progress is estimated from the account's following count (display only; never used for decisions). Automatic runs show processed/total and a countdown to the next account.
+- Avatars use a larger rendition of the same X profile image, falling back to the URL X supplied.
+- CSV file names include the username and scan time. "/" focuses search; arrow keys switch between manual and automatic mode.
+- The rate-limit message and the uncertain-outcome help text were updated in all ten languages; 15 new interface strings were added in all ten languages.
+
+## Unchanged
+
+- Permissions (`activeTab`, `scripting`, `storage`; optional `https://x.com/*`), storage keys and formats, X request types, and the fresh identity and relationship checks, single-use write proof and read-back before every write.
+
+## Verification
+
+VERIFICATION_PLACEHOLDER
+
+## 中文说明
+
+**状态：未发布。**本条目说明开发分支上的源码，仅供维护者自行验收测试。在 1.3 通过验收前，公开下载与 README 仍为 1.2.4。清单版本 `1.3`，package 版本 `1.3.0`。
+
+稳定性：
+
+- **在 X 页面内跳转不再断开连接。**Chrome 对同一文档内的跳转（链接、`pushState`、`replaceState`、哈希变化，已在 Chrome 153 实测）同样报告 `loading`。1.2.4 会因此断开控制会话并丢弃正在进行的扫描；1.3 保持会话，并在加载完成后核对页面租约。刷新、跨文档跳转、离开 x.com 或失去访问权限仍会断开；连接过程中的任何跳转仍会取消该次连接。
+- **扫描中断后可继续，不必从头开始。**遇到限流、网络或 HTTP 失败、登录验证、页面刷新、标签页关闭、权限撤销、后台重启或连接被替换时，已读取的页面会保留。点击“继续扫描”会重新连接、核验同一账号，并从第一个未读页面或未核验的关系批次继续。切换账号、清除本地数据、数据结构异常（`SCHEMA`、`INCOMPLETE`）以及尚未读取任何页面的中断仍会作废断点。白名单添加失败不再丢弃已暂停的扫描。
+- **页面结果丢失时按安全方式归类：**读取视为页面跳转，写入一律标为“结果不确定”。此前写入在这种情况下可能被记为结构错误而停止，从而失去防重复保护。
+- **限流时显示 X 给出的恢复时间**（来自 `x-rate-limit-reset`），不会自动重试。
+- **白名单中输入不存在或已封禁的用户名**会提示“未找到”，不断开连接、不保存，并保留已输入的文字供修改。
+- **“结果不确定”的账号可以重新核实：**一次实时读取后，已取关的确认为已取关；已回关的标为跳过；仍关注且未回关的回到待处理，需再次明确确认。重新核实不会执行写入。1.2.4 中只有清除全部本地数据才能解除此状态。
+- **再次点击工具栏图标不再关闭控制窗口：**从已绑定的 X 标签页或其他网站点击时，会切换到已打开的窗口并保留扫描；从另一个 X 标签页点击时仍会打开绑定该标签页的新窗口。
+- **操作间隔与批次数量可正常输入：**合法数值即时生效，其余在回车或失焦时校正。1.2.4 每输入一个字符就立即校正，输入“30”会得到 50。
+- 白名单查询进行中时，其他操作会被禁用，而不是被引擎静默忽略。
+
+界面：全新设计令牌体系与排版、集成扫描状态的概览区、带未回关占比环的统计卡、进度条、骨架加载、分段模式切换、列表行、对话框与外观编辑器；跟随系统深色模式，浅色与深色配色的所有测量文字对比度均不低于 4.5:1；尊重“减少动态效果”设置。按账号关注总数估算扫描进度（仅用于显示），自动处理显示进度与下一个账号倒计时。头像优先加载同一图片的较大尺寸版本，失败时回退到 X 提供的原地址。CSV 文件名包含用户名与扫描时间；按“/”聚焦搜索，方向键切换手动/自动模式。十种语言同步更新限流与“结果不确定”说明，并新增 15 条界面文案。
+
+未改变：权限、本地存储键与格式、X 请求类型，以及每次写入前的身份与关系实时核验、一次性写入凭证和写后回读。
+
+---
+
 # WhiteWolf 1.2.4 — 2026-10-23
 
 Version 1.2.3 stopped all automatic unfollowing whenever a scan excluded even one explicit unavailable-user placeholder. Version 1.2.4 allows automatic processing of verified normal accounts after pagination, relationship checks and final account-identity verification finish.

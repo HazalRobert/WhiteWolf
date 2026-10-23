@@ -14,7 +14,7 @@ const people = [
   ['112','max_field','Max Field','Technology and ideas.'],
 ];
 export class DemoAdapter implements Adapter {
-  private actor:Account={id:'9000001',handle:'demo_account',name:'Demo account'};
+  private actor:Account={id:'9000001',handle:'demo_account',name:'Demo account',followingCount:people.length};
   private cancelled=false;
   private removed=new Set<string>();
   async connect(){this.cancelled=false;return this.actor;}
@@ -22,7 +22,7 @@ export class DemoAdapter implements Adapter {
   async identity(expected?:string){this.active();if(expected&&expected!==this.actor.id)throw new Error('ACCOUNT_CHANGED: Demo');return this.actor;}
   async following(actorId:string,cursor:string){await this.identity(actorId);return {users:cursor==='-1'?people.filter(p=>!this.removed.has(p[0])).map(([id,handle,name,bio])=>({id,handle,name,bio})):[],nextCursor:'0'};}
   async relations(actorId:string,ids:string[]):Promise<Relation[]>{await this.identity(actorId);return ids.map(id=>({id,following:!this.removed.has(id),followedBy:Number(id)%4===0}));}
-  async resolve(actorId:string,handle:string):Promise<Person>{await this.identity(actorId);const p=people.find(p=>p[1].toLowerCase()===handle.toLowerCase());return p?{id:p[0],handle:p[1],name:p[2]}:{id:'99999',handle,name:handle};}
+  async resolve(actorId:string,handle:string):Promise<Person>{await this.identity(actorId);const p=people.find(p=>p[1].toLowerCase()===handle.toLowerCase());if(p)return {id:p[0],handle:p[1],name:p[2]};if(handle.toLowerCase()==='magicalstocker')return {id:'99999',handle:'MagicalStocker',name:'MagicalStocker'};throw new Error(`NOT_FOUND: @${handle} is unavailable or does not exist on X.`);}
   async unfollow(actorId:string,targetId:string){await this.identity(actorId);this.removed.add(targetId);}
   async followAuthor(actorId:string){await this.identity(actorId);}
   cancel(){this.cancelled=true;}

@@ -8,7 +8,28 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = process.cwd();
 const executablePath = process.env.BROWSER_EXECUTABLE || chromium.executablePath();
-const report = { at: new Date().toISOString(), scope: 'Rendered UI with local synthetic data only; all non-loopback network requests blocked', layouts: [], typography: {}, contrasts: [], errors: [], screenshots: [] };
+const report = { at: new Date().toISOString(), scope: 'Rendered UI with local synthetic data only; all non-loopback network requests blocked', layouts: [], darkLayouts: [], typography: {}, contrasts: [], darkContrasts: [], errors: [], screenshots: [] };
+const contrastSelectors = ['.brand-caption', '.language-picker select', '.demo-banner', '.connection-copy strong', '.eyebrow', '.section-heading h1', '.section-heading .button-dark', '.stat-label', '.stat-highlight .stat-label', '.scan-status', '.scan-status time', '.mode-tabs button.active', '.results-heading p', '.person-name a', '.person-handle', '.relationship-badge', '.button-unfollow', '.footer-note', '.author-label', '.stat-foot', '.free-badge', '.connected-indicator'];
+const measureContrast = page => page.evaluate(selectors => {
+  const color = s => s.match(/[\d.]+/g).map(Number);
+  const luminance = rgb => rgb.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((v, c, i) => v + c * [.2126, .7152, .0722][i], 0);
+  return selectors.map(selector => {
+    const e = document.querySelector(selector), style = getComputedStyle(e); let parent = e, bg;
+    while (parent) { bg = color(getComputedStyle(parent).backgroundColor); if (bg.length < 4 || bg[3] === 1) break; parent = parent.parentElement; }
+    const fg = luminance(color(style.color)), background = luminance(bg || [255, 255, 255]);
+    const ratio = (Math.max(fg, background) + .05) / (Math.min(fg, background) + .05);
+    return { selector, ratio: Math.round(ratio * 100) / 100 };
+  });
+}, contrastSelectors);
+const measureLayout = page => page.evaluate(() => {
+  const visible = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const controls = [...document.querySelectorAll('button,input,select')].filter(visible);
+  const overflowing = controls.filter(e => { const r = e.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth + 1; }).map(e => e.className || e.tagName);
+  const header = [...document.querySelectorAll('.app-header > *')].filter(visible).map(e => e.getBoundingClientRect());
+  const overlap = header.some((a, i) => header.slice(i + 1).some(b => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1));
+  const minText = Math.min(...[...document.querySelectorAll('main *')].filter(e => visible(e) && [...e.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim())).map(e => parseFloat(getComputedStyle(e).fontSize)));
+  return { width: innerWidth, scrollWidth: document.documentElement.scrollWidth, overflowing, headerOverlap: overlap, minTextPx: minText };
+});
 await mkdir('qa/design', { recursive: true });
 const server = createServer(async (req, res) => {
   try {
@@ -36,15 +57,7 @@ try {
       await page.locator('.language-picker select').selectOption(language);
       for (const mode of ['manual', 'auto']) {
         await page.locator('#tab-' + mode).click();
-        const result = await page.evaluate(() => {
-          const visible = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-          const controls = [...document.querySelectorAll('button,input,select')].filter(visible);
-          const overflowing = controls.filter(e => { const r = e.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth + 1; }).map(e => e.className || e.tagName);
-          const header = [...document.querySelectorAll('.app-header > *')].filter(visible).map(e => e.getBoundingClientRect());
-          const overlap = header.some((a, i) => header.slice(i + 1).some(b => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1));
-          const minText = Math.min(...[...document.querySelectorAll('main *')].filter(e => visible(e) && [...e.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim())).map(e => parseFloat(getComputedStyle(e).fontSize)));
-          return { width: innerWidth, scrollWidth: document.documentElement.scrollWidth, overflowing, headerOverlap: overlap, minTextPx: minText };
-        });
+        const result = await measureLayout(page);
         report.layouts.push({ width, language, mode, ...result });
         assert.ok(result.scrollWidth <= width && !result.overflowing.length && !result.headerOverlap, JSON.stringify({ width, language, mode, ...result }));
         assert.ok(result.minTextPx >= 14, `Text below 14px: ${width}/${language}/${mode}`);
@@ -62,17 +75,7 @@ try {
   });
   assert.ok(report.typography.namePx >= 17 && report.typography.buttonHeightPx >= 44);
   assert.ok(report.typography.firstRowTopPx < 780, 'Results should appear without excessive page chrome');
-  report.contrasts = await page.evaluate(() => {
-    const color = s => s.match(/[\d.]+/g).map(Number);
-    const luminance = rgb => rgb.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((v, c, i) => v + c * [.2126, .7152, .0722][i], 0);
-    return ['.brand-caption', '.language-picker select', '.demo-banner', '.connection-copy strong', '.eyebrow', '.section-heading h1', '.section-heading .button-dark', '.stat-label', '.stat-highlight .stat-label', '.scan-status', '.scan-status time', '.mode-tabs button.active', '.results-heading p', '.person-name a', '.person-handle', '.relationship-badge', '.button-unfollow', '.footer-note', '.author-label'].map(selector => {
-      const e = document.querySelector(selector), style = getComputedStyle(e); let parent = e, bg;
-      while (parent) { bg = color(getComputedStyle(parent).backgroundColor); if (bg.length < 4 || bg[3] === 1) break; parent = parent.parentElement; }
-      const fg = luminance(color(style.color)), background = luminance(bg || [255, 255, 255]);
-      const ratio = (Math.max(fg, background) + .05) / (Math.min(fg, background) + .05);
-      return { selector, ratio: Math.round(ratio * 100) / 100 };
-    });
-  });
+  report.contrasts = await measureContrast(page);
   assert.ok(report.contrasts.every(c => c.ratio >= 4.5), JSON.stringify(report.contrasts.filter(c => c.ratio < 4.5)));
   const capture = async (name, fullPage = false) => { await page.evaluate(() => scrollTo(0, 0)); await page.mouse.move(0, 0); await page.waitForTimeout(200); await page.screenshot({ path: `qa/design/${name}.png`, fullPage }); report.screenshots.push(name + '.png'); };
   await capture('manual-overview'); await capture('manual-desktop', true);
@@ -97,9 +100,42 @@ try {
   await page.locator('.button-unfollow').first().click();
   assert.ok(await page.locator('dialog').evaluate(e => e.scrollWidth <= e.clientWidth));
   await page.locator('dialog').screenshot({ path: 'qa/design/confirmation-compact.png' }); report.screenshots.push('confirmation-compact.png');
+  // The system dark palette must meet the same text, layout and contrast guarantees.
+  const dark = await browser.newPage({ viewport: { width: 1100, height: 920 }, colorScheme: 'dark' });
+  const darkNetwork = await restrictToLocalOrigin(dark.context(), 'http://127.0.0.1:4182');
+  dark.on('pageerror', e => report.errors.push(e.message));
+  await dark.goto('http://127.0.0.1:4182');
+  await dark.getByText('Alex Morgan', { exact: true }).waitFor();
+  assert.equal(await dark.evaluate(() => getComputedStyle(document.documentElement).colorScheme), 'dark');
+  for (const width of [1100, 520, 360]) {
+    await dark.setViewportSize({ width, height: 920 });
+    for (const language of ['zh-CN', 'en', 'fr', 'es', 'ru', 'de', 'pt', 'ja', 'ko', 'ar']) {
+      await dark.locator('.language-picker select').selectOption(language);
+      for (const mode of ['manual', 'auto']) {
+        await dark.locator('#tab-' + mode).click();
+        const result = await measureLayout(dark);
+        report.darkLayouts.push({ width, language, mode, ...result });
+        assert.ok(result.scrollWidth <= width && !result.overflowing.length && !result.headerOverlap, JSON.stringify({ dark: true, width, language, mode, ...result }));
+        assert.ok(result.minTextPx >= 14, `Dark text below 14px: ${width}/${language}/${mode}`);
+      }
+    }
+  }
+  await dark.setViewportSize({ width: 1100, height: 920 });
+  await dark.locator('.language-picker select').selectOption('zh-CN');
+  await dark.locator('#tab-manual').click(); await dark.mouse.move(0, 0); await dark.waitForTimeout(200);
+  report.darkContrasts = await measureContrast(dark);
+  assert.ok(report.darkContrasts.every(c => c.ratio >= 4.5), JSON.stringify(report.darkContrasts.filter(c => c.ratio < 4.5)));
+  const captureDark = async (name, fullPage = true) => { await dark.evaluate(() => scrollTo(0, 0)); await dark.mouse.move(0, 0); await dark.waitForTimeout(200); await dark.screenshot({ path: `qa/design/${name}.png`, fullPage }); report.screenshots.push(name + '.png'); };
+  await captureDark('dark-manual-desktop');
+  await dark.locator('#tab-auto').click(); await captureDark('dark-automatic-desktop');
+  await dark.setViewportSize({ width: 360, height: 800 }); await captureDark('dark-mobile-overview', false);
+  await dark.locator('#tab-manual').click(); await dark.locator('.button-unfollow').first().click();
+  assert.ok(await dark.locator('dialog').evaluate(e => e.scrollWidth <= e.clientWidth));
+  await dark.locator('dialog').screenshot({ path: 'qa/design/dark-confirmation-compact.png' }); report.screenshots.push('dark-confirmation-compact.png');
+  darkNetwork.assertIsolated();
   assert.equal(report.errors.length, 0);
   network.assertIsolated();
   report.passed = true;
-  console.log(JSON.stringify({ layouts: report.layouts.length, typography: report.typography, minContrast: Math.min(...report.contrasts.map(c => c.ratio)), screenshots: report.screenshots, errors: report.errors }, null, 2));
+  console.log(JSON.stringify({ layouts: report.layouts.length, darkLayouts: report.darkLayouts.length, typography: report.typography, minContrast: Math.min(...report.contrasts.map(c => c.ratio)), minDarkContrast: Math.min(...report.darkContrasts.map(c => c.ratio)), screenshots: report.screenshots, errors: report.errors }, null, 2));
 } catch (e) { report.failure = e.stack || String(e); console.error(report.failure); process.exitCode = 1; }
 finally { if (browser) await browser.close(); server.close(); await writeFile('qa/design/design-report.json', JSON.stringify(report, null, 2)); }

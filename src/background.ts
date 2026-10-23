@@ -2,12 +2,13 @@ import { isWhitelisted, type PageOperation, type RuntimeInput, type RuntimeResul
 import type { Account, Person } from './types';
 
 const bootId = crypto.randomUUID();
-type Owner = { port: chrome.runtime.Port; sessionId: string; tabId: number; actorId: string | null; cancelled: boolean; busy: boolean; requiresHostPermission: boolean; pageStarted: boolean };
+type Owner = { port: chrome.runtime.Port; sessionId: string; tabId: number; actorId: string | null; cancelled: boolean; busy: boolean; requiresHostPermission: boolean; pageStarted: boolean; navigating: boolean };
 let owner: Owner | null = null;
 let windowId: number | null = null;
 let opening: Promise<void> = Promise.resolve();
 const isX = (url: string | undefined): boolean => { try { return new URL(url ?? '').origin === 'https://x.com'; } catch { return false; } };
 const xOrigin = 'https://x.com/*';
+const NAVIGATED = 'TAB_REQUIRED: The selected X page reloaded or navigated. Reconnect after it finishes loading.';
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
@@ -36,6 +37,8 @@ async function execute(session: Owner, operation: PageOperation): Promise<unknow
     catch {
       if (isWrite) throw new Error('UNCERTAIN: The X page connection ended during an action. Verify the relationship before trying again.');
       checkLease();
+      // A document replaced mid-injection is a navigation, not a missing permission.
+      if (session.navigating) throw new Error(NAVIGATED);
       throw new Error('TAB_PERMISSION: Cannot access the selected X tab. Allow access to x.com, or click the extension icon from that tab.');
     }
   };
@@ -49,15 +52,35 @@ async function execute(session: Owner, operation: PageOperation): Promise<unknow
       target: { tabId: session.tabId, frameIds: [0] }, world: 'MAIN',
       func: (input:RuntimeInput) => {
         const runtime=(window as typeof window & {__reciprocalXRuntimeV2?:(input:RuntimeInput)=>RuntimeResult|Promise<RuntimeResult>}).__reciprocalXRuntimeV2;
-        return runtime?runtime(input):{ok:false,error:'API_UNAVAILABLE: Reload the X page and reopen the extension.'};
+        // After CONNECT installed the runtime, its absence means the document was replaced; nothing was sent.
+        return runtime?runtime(input):{ok:false,error:input.type==='PAGE'&&input.operation.kind!=='connect'
+          ?'TAB_REQUIRED: The selected X page reloaded or navigated. Reconnect after it finishes loading.'
+          :'API_UNAVAILABLE: Reload the X page and reopen the extension.'};
       },
       args: [{ type: 'PAGE', sessionId: session.sessionId, bootId, operation }],
   });
   checkLease(true);
   result = injections[0]?.result as RuntimeResult | undefined;
-  if (!result || typeof result.ok !== 'boolean') throw new Error('SCHEMA: The X adapter returned no valid result.');
+  if (!result || typeof result.ok !== 'boolean') {
+    // A page function still pending when its document is replaced settles without a result. A write may
+    // already have been sent; a read is a navigation once the page lease no longer exists.
+    if (isWrite) throw new Error('UNCERTAIN: The X page connection ended during an action. Verify the relationship before trying again.');
+    if (operation.kind === 'probe' || operation.kind === 'cancel' || session.navigating || !await leaseIntact(session)) throw new Error(NAVIGATED);
+    throw new Error('SCHEMA: The X adapter returned no valid result.');
+  }
   if (!result.ok) throw new Error(result.error);
   return result.data;
+}
+
+/** Read-only check that this session's page lease still exists in the selected tab's current document. */
+async function leaseIntact(session: Owner): Promise<boolean> {
+  try { return await execute(session, { kind: 'probe' }) === true; } catch { return false; }
+}
+
+/** Same-document X navigation keeps the page lease; a replaced document or lost access ends the session. */
+async function probeAfterNavigation(session: Owner): Promise<void> {
+  const intact = await leaseIntact(session);
+  if (!intact && owner === session && !session.cancelled) endSession(session, NAVIGATED);
 }
 
 function stop(session: Owner): void {
@@ -75,7 +98,7 @@ function endSession(session: Owner, error: string): void {
   try { session.port.disconnect(); } catch { /* UI closed */ }
 }
 
-function operationFrom(value: unknown, actorId: string): Exclude<PageOperation, { kind: 'connect' | 'cancel' }> {
+function operationFrom(value: unknown, actorId: string): Exclude<PageOperation, { kind: 'connect' | 'cancel' | 'probe' }> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('SCHEMA: Invalid command.');
   const op = value as Record<string, unknown>;
   if (op.actorId !== actorId) throw new Error('ACCOUNT_CHANGED: Command does not match the connected account.');
@@ -121,7 +144,7 @@ chrome.runtime.onConnect.addListener(port => {
           if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId) || tabId < 0) throw new Error('TAB_REQUIRED: Select an open https://x.com tab before connecting.');
           if (owner) endSession(owner, 'CANCELLED: This control session was replaced by another connection. Reconnect explicitly.');
           session = { port, sessionId: crypto.randomUUID(), tabId, actorId: null, cancelled: false, busy: true,
-            requiresHostPermission: declaredTab !== String(tabId), pageStarted: false };
+            requiresHostPermission: declaredTab !== String(tabId), pageStarted: false, navigating: false };
           owner = session;
           const account = await execute(session, { kind: 'connect' }) as Account;
           if (owner !== session || session.cancelled) throw new Error('CANCELLED: Connection was replaced.');
@@ -170,8 +193,14 @@ function disconnectOwner(error: string): void {
 }
 chrome.tabs.onRemoved.addListener(tabId => { if (owner?.tabId === tabId) disconnectOwner('TAB_REQUIRED: The selected X tab was closed. Select an open X tab.'); });
 chrome.tabs.onUpdated.addListener((tabId, change) => {
-  // A full navigation invalidates the page lease, even when it remains on x.com.
-  if (owner?.tabId === tabId && (change.status === 'loading' || (change.url !== undefined && !isX(change.url)))) disconnectOwner('TAB_REQUIRED: The selected X page reloaded or navigated. Reconnect after it finishes loading.');
+  const session = owner;
+  if (!session || session.tabId !== tabId) return;
+  // Leaving x.com, or any navigation before CONNECT established the page lease, ends the session at once.
+  if ((change.url !== undefined && !isX(change.url)) || (change.status === 'loading' && !session.actorId)) { disconnectOwner(NAVIGATED); return; }
+  // X is a single-page app: in-app links and history updates also report loading. Keep the session and
+  // verify the lease when loading completes; a reload or cross-document navigation leaves no lease behind.
+  if (change.status === 'loading') session.navigating = true;
+  else if (change.status === 'complete' && session.navigating) { session.navigating = false; void probeAfterNavigation(session); }
 });
 chrome.permissions.onRemoved.addListener(permissions => {
   if (permissions.origins?.includes(xOrigin) && owner) {
@@ -179,20 +208,38 @@ chrome.permissions.onRemoved.addListener(permissions => {
   }
 });
 chrome.windows.onRemoved.addListener(id => { if (id === windowId) { windowId = null; disconnectOwner('CANCELLED: The control window was closed. Reconnect explicitly.'); } });
+/** Return to the single open control page instead of discarding its in-memory scan. */
+async function focusControl(control: chrome.runtime.ExtensionContext): Promise<boolean> {
+  try {
+    const target = await chrome.windows.get(control.windowId);
+    await chrome.windows.update(control.windowId, target.state === 'minimized' ? { focused: true, state: 'normal' } : { focused: true });
+    await chrome.tabs.update(control.tabId, { active: true });
+    windowId = control.windowId;
+    return true;
+  } catch { return false; }
+}
 chrome.action.onClicked.addListener(tab => {
   opening = opening.catch(() => {}).then(async () => {
-    if (owner) endSession(owner, 'CANCELLED: A new control window replaced this connection. Reconnect explicitly.');
     // Worker restarts lose windowId. Discover all surviving control pages, including tabs moved into normal windows.
     const expectedPage = chrome.runtime.getURL('index.html');
     const contexts = await chrome.runtime.getContexts({});
-    const controlTabs = [...new Set(contexts.filter(context =>
-      context.tabId >= 0 && context.documentUrl?.split('?')[0].split('#')[0] === expectedPage,
-    ).map(context => context.tabId))];
+    const controls = contexts.filter(context => context.tabId >= 0 && context.documentUrl?.split('?')[0].split('#')[0] === expectedPage);
+    const controlTabs = [...new Set(controls.map(context => context.tabId))];
+    const clickedX = typeof tab.id === 'number' && isX(tab.url);
+    if (controlTabs.length === 1) {
+      const control = controls.find(context => context.tabId === controlTabs[0])!;
+      let declared: string | null = null;
+      try { declared = new URL(control.documentUrl!).searchParams.get('tab'); } catch { /* replace below */ }
+      // A repeated click on the bound tab, or a click from another site, keeps the open page and its scan.
+      // A click from a different X tab is an explicit choice of that tab and replaces the page.
+      if ((!clickedX || declared === String(tab.id)) && await focusControl(control)) return;
+    }
+    if (owner) endSession(owner, 'CANCELLED: A new control window replaced this connection. Reconnect explicitly.');
     windowId = null;
     // Remove only our own control tabs; never close a browser window that may contain unrelated sites.
     await Promise.all(controlTabs.map(id => chrome.tabs.remove(id).catch(() => {})));
     const page = new URL(chrome.runtime.getURL('index.html'));
-    if (typeof tab.id === 'number' && isX(tab.url)) page.searchParams.set('tab', String(tab.id));
+    if (clickedX) page.searchParams.set('tab', String(tab.id));
     else page.searchParams.set('reason', 'open-from-x');
     const created = await chrome.windows.create({ url: page.href, type: 'popup', width: 1160, height: 820, focused: true });
     windowId = created?.id ?? null;

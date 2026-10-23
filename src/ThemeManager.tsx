@@ -240,7 +240,7 @@ export function ThemeManager({ language, state, onChange, onPreview, onClose, pr
               <div className="tm-preview-copy" aria-hidden="true"><span className="tm-preview-wordmark">WhiteWolf<span>· X</span></span><span>{tr('brandDescriptor')}</span><i /></div>
               {isCustom && <span className="tm-drag-indicator" aria-hidden="true"><Move size={17} /></span>}
             </div>
-            <div className="tm-preview-stats" aria-hidden="true"><span><i /><b /></span><span><i /><b /></span><span><i /><b /></span></div>
+            <div className="tm-preview-stats" aria-hidden="true"><span><i /><b /></span><span><i /><b /></span><span><i /><b /></span><span><i /><b /></span></div>
           </div>
           {isCustom ? <>
             <p className="tm-preview-hint" id={hintId}><Move size={14} />{tr('previewHint')}</p>

@@ -1,6 +1,6 @@
 export type Language = 'zh-CN' | 'en' | 'fr' | 'es' | 'ru' | 'de' | 'pt' | 'ja' | 'ko' | 'ar';
 export type Mode = 'manual' | 'auto';
-export interface Account { id: string; handle: string; name: string; }
+export interface Account { id: string; handle: string; name: string; /** Following count reported by X; display-only progress estimate. */ followingCount?: number; }
 export interface Person extends Account { avatar?: string; bio?: string; }
 export interface Relation { id: string; following: boolean | null; followedBy: boolean | null; }
 export interface FollowingPage { users: Person[]; nextCursor: string; relations?: Relation[]; unavailableCount?: number; }
@@ -19,6 +19,8 @@ export interface AppState {
   pausePending?: boolean; canResumeScan?: boolean;
   unavailableCount?: number;
   autoReady?: boolean;
+  /** Informational progress of the current automatic run; never used to authorize a write. */
+  runProgress?: { total: number; processed: number; nextAt: number | null } | null;
 }
 export interface Adapter {
   setSessionLostListener?(listener: (message: string) => void): void;
@@ -33,7 +35,7 @@ export interface Adapter {
 }
 export interface Actions {
   connect(): Promise<void>; scan(): Promise<void>; resumeScan(): Promise<void>; pause(): void;
-  unfollow(id: string): Promise<void>; startAuto(): Promise<void>; followAuthor(): Promise<void>;
+  unfollow(id: string): Promise<void>; recheck(id: string): Promise<void>; startAuto(): Promise<void>; followAuthor(): Promise<void>;
   setLanguage(language: Language): void; setMode(mode: Mode): void;
   setPacing(seconds: number, limit: number): void;
   addWhitelist(text: string): Promise<void>; removeWhitelist(handle: string): void;

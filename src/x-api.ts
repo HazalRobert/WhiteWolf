@@ -6,6 +6,7 @@ import { isValidCursor } from './cursor';
 export type PageOperation =
   | { kind: 'connect' }
   | { kind: 'cancel' }
+  | { kind: 'probe' }
   | { kind: 'identity'; actorId: string }
   | { kind: 'following'; actorId: string; cursor: string }
   | { kind: 'relations'; actorId: string; ids: string[] }
@@ -114,6 +115,11 @@ export function xPageRuntime(input: RuntimeInput): RuntimeResult | Promise<Runti
         if (page.__reciprocalXLeaseV1?.sessionId === input.sessionId && page.__reciprocalXLeaseV1.bootId === input.bootId) page.__reciprocalXLeaseV1.cancelled = true;
         return { ok: true, data: null };
       }
+      if (operation.kind === 'probe') {
+        // Read-only lease check after a tab navigation; it never touches X or the lease itself.
+        const current = page.__reciprocalXLeaseV1;
+        return { ok: true, data: !!current && current.sessionId === input.sessionId && current.bootId === input.bootId && !current.cancelled };
+      }
       if (operation.kind === 'connect') {
         if (page.__reciprocalXLeaseV1?.pendingWrite) return fail('UNCERTAIN', 'A previous write is still awaiting a result. Wait and reconnect.');
         if (page.__reciprocalXLeaseV1) page.__reciprocalXLeaseV1.cancelled = true;
@@ -189,7 +195,12 @@ export function xPageRuntime(input: RuntimeInput): RuntimeResult | Promise<Runti
           if(dispatchCount!==1)return fail('API_UNAVAILABLE','The native client reused an existing request; fresh verification is unavailable.');
           guard();
           const detail=`${operationName} ${method} ${path}: HTTP ${response.status}; automatic retry is disabled.`;
-          if(response.status===429)return fail('RATE_LIMIT',detail);
+          if(response.status===429){
+            // X's reset header is epoch seconds. Report it only when it is plausible; it never schedules a retry.
+            const reset=/^\d{9,11}$/.test(response.headers?.['x-rate-limit-reset']??'')?Number(response.headers['x-rate-limit-reset'])*1000:NaN;
+            const resetAt=reset>Date.now()-60_000&&reset<Date.now()+86_400_000?`; resetAt=${new Date(reset).toISOString()}`:'';
+            return fail('RATE_LIMIT',`${operationName} ${method} ${path}: HTTP 429${resetAt}; automatic retry is disabled.`);
+          }
           if(response.status===401||response.status===403)return fail('AUTH',detail);
           if(response.status<200||response.status>=300)return fail(write?'UNCERTAIN':'HTTP',detail);
           if(write)return null;
@@ -217,9 +228,9 @@ export function xPageRuntime(input: RuntimeInput): RuntimeResult | Promise<Runti
         try{return parseXPayload(...args);}catch(error){return fail('SCHEMA',error instanceof Error&&error.message.startsWith('SCHEMA: ')?error.message.slice(8):'The X response schema was not recognized.');}
       };
       const verify=async():Promise<Account>=>{
-        const account=parse('viewer',await graphql('Viewer',{withCommunitiesMemberships:feature('c9s_enabled')},{isDelegate:false,withAuxiliaryUserLabels:feature('blue_business_multi_affiliates_ui_enabled')})) as Person;
+        const account=parse('viewer',await graphql('Viewer',{withCommunitiesMemberships:feature('c9s_enabled')},{isDelegate:false,withAuxiliaryUserLabels:feature('blue_business_multi_affiliates_ui_enabled')})) as Account;
         if(account.id!==expectedActor)return fail('ACCOUNT_CHANGED','The verified account differs from this run.');
-        guard();return {id:account.id,handle:account.handle,name:account.name};
+        guard();return {id:account.id,handle:account.handle,name:account.name,...(account.followingCount===undefined?{}:{followingCount:account.followingCount})};
       };
       const readUser=async(targetId:string):Promise<{person:Person;relation:Relation}>=>{
         const data=await graphql('UserByRestId',{userId:id(targetId)});
@@ -228,7 +239,16 @@ export function xPageRuntime(input: RuntimeInput): RuntimeResult | Promise<Runti
         return {person:target,relation:parse('relationFromUser',raw,{targetId}) as Relation};
       };
       const freshRelation=async(targetId:string):Promise<Relation>=>(await readUser(targetId)).relation;
-      const resolve=async(username:string):Promise<Person>=>parse('userGraphql',await graphql('UserByScreenName',{screen_name:handle(username),withGrokTranslatedBio:false},{withAuxiliaryUserLabels:feature('blue_business_multi_affiliates_ui_enabled'),withPayments:false})) as Person;
+      const resolve=async(username:string):Promise<Person>=>{
+        const data=await graphql('UserByScreenName',{screen_name:handle(username),withGrokTranslatedBio:false},{withAuxiliaryUserLabels:feature('blue_business_multi_affiliates_ui_enabled'),withPayments:false});
+        // Unknown and suspended names have no user or an explicit placeholder. This read-only lookup
+        // failure is not a session or schema failure; any other shape still goes through the strict parser.
+        const body=record(data).data,user=body&&typeof body==='object'&&!Array.isArray(body)?(body as Record<string,unknown>).user:undefined;
+        const result=user&&typeof user==='object'&&!Array.isArray(user)?(user as Record<string,unknown>).result:undefined;
+        if(body&&typeof body==='object'&&!Array.isArray(body)&&(user===undefined||user===null||(typeof user==='object'&&!Array.isArray(user)&&(result===undefined||result===null)&&Object.keys(user).every(key=>key==='result'))
+          ||(!!result&&typeof result==='object'&&(result as Record<string,unknown>).__typename==='UserUnavailable')))return fail('NOT_FOUND',`@${username} is unavailable or does not exist on X.`);
+        return parse('userGraphql',data) as Person;
+      };
 
       if (operation.kind === 'connect' || operation.kind === 'identity') return { ok: true, data: await verify() };
       guard();

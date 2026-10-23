@@ -119,7 +119,9 @@ export async function installXFixture(context) {
   const requests = [];
   const violations = [];
   const following = new Set([fixtureIds.alice, fixtureIds.bob, fixtureIds.chen]);
-  const state = { limited: false, unsupportedInstruction: false, multiPage: false };
+  // Optional 1.3 scenario hooks; their defaults keep every earlier scenario unchanged.
+  const state = { limited: false, unsupportedInstruction: false, multiPage: false,
+    beforeFollowing: null, failWrite: false, abortedWrites: [], notFoundScreenName: null, resetAt: null, followingCount: null };
   const people = [
     fixtureActor,
     { id: fixtureIds.alice, handle: 'fixture_alice', name: 'Fixture Alice' },
@@ -135,7 +137,7 @@ export async function installXFixture(context) {
     legacy: { screen_name: person.handle, name: person.name, following: following.has(person.id), followed_by: person.id === fixtureIds.bob },
     relationship_perspectives: { following: following.has(person.id), followed_by: person.id === fixtureIds.bob },
   });
-  const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const json = (route, body, status = 200, headers = {}) => route.fulfill({ status, contentType: 'application/json', headers, body: JSON.stringify(body) });
   await context.addInitScript(installSyntheticPageClient, { actorId: fixtureActor.id, fixtureCsrf: csrf });
   await context.addCookies([
     { name: 'twid', value: 'u%3D' + fixtureActor.id, domain: 'x.com', path: '/', secure: true },
@@ -176,8 +178,17 @@ export async function installXFixture(context) {
         assert.equal(url.search, '', 'Relationship mutations must not put parameters in the URL.');
         assert.match(headers['content-type'] || '', /^application\/x-www-form-urlencoded(?:;|$)/i, 'Mutation encoding must come from native filters.');
       }
-      if (state.limited) return json(route, { error: 'synthetic rate limit' }, 429);
-      if (operation === 'Viewer') {assert.deepEqual(variables,{withCommunitiesMemberships:false});return json(route, { data: { viewer: { user_results: { result: result(fixtureActor) } } } });}
+      if (state.limited) return json(route, { error: 'synthetic rate limit' }, 429, state.resetAt ? { 'x-rate-limit-reset': String(state.resetAt) } : {});
+      if (operation === 'Viewer') {
+        assert.deepEqual(variables,{withCommunitiesMemberships:false});
+        const actor = result(fixtureActor);
+        if (state.followingCount !== null) actor.legacy.friends_count = state.followingCount;
+        return json(route, { data: { viewer: { user_results: { result: actor } } } });
+      }
+      // A scenario hook may hold a page, drop it as a transport failure, or rate-limit only that page.
+      const hook = operation === 'Following' && state.beforeFollowing ? await state.beforeFollowing(variables) : undefined;
+      if (hook === 'abort') return route.abort('failed').catch(() => {});
+      if (hook === 'limit') return json(route, { error: 'synthetic rate limit' }, 429, state.resetAt ? { 'x-rate-limit-reset': String(state.resetAt) } : {});
       if (operation === 'Following') {
         assert.equal(variables.userId, fixtureActor.id, 'Following must target the connected actor.');
         assert.equal(variables.count,20);assert.equal(variables.includePromotedContent,false);assert.equal(variables.withGrokTranslatedBio,false);
@@ -196,6 +207,7 @@ export async function installXFixture(context) {
       if (operation === 'UserByRestId' || operation === 'UserByScreenName') {
         if(operation==='UserByRestId')assert.deepEqual(Object.keys(variables),['userId']);
         else {assert.deepEqual(Object.keys(variables).sort(),['screen_name','withGrokTranslatedBio']);assert.equal(variables.withGrokTranslatedBio,false);}
+        if (operation === 'UserByScreenName' && state.notFoundScreenName && String(variables.screen_name).toLowerCase() === state.notFoundScreenName.toLowerCase()) return json(route, { data: {} });
         const person = operation === 'UserByRestId'
           ? byId(variables.userId)
           : people.find(candidate => candidate.handle.toLowerCase() === String(variables.screen_name || '').toLowerCase());
@@ -207,6 +219,8 @@ export async function installXFixture(context) {
       const targetId = params.get('user_id');
       const person = byId(targetId);
       assert.ok(person && targetId !== fixtureActor.id, 'Mutation target must be another fixture account.');
+      // A transport failure after dispatch: the write never reached the synthetic account.
+      if (state.failWrite) { state.abortedWrites.push({ action, id: targetId }); return route.abort('failed'); }
       writes.push({ action, id: targetId });
       if (action === 'unfollow') following.delete(targetId);
       else following.add(targetId);

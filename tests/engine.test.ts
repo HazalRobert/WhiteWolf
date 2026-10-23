@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller, parseHandles, isWhitelisted, isAutoReady, csvCell } from '../src/engine';
+import { Controller, parseHandles, isWhitelisted, isAutoReady, csvCell, csvFileName } from '../src/engine';
 import { emptySaved, type Repository, type Saved } from '../src/storage';
 import type { Adapter, FollowingPage, Relation } from '../src/types';
 class Memory implements Repository{data=emptySaved();async read(){return structuredClone(this.data)}async write(data:Saved){this.data=structuredClone(data)}}
@@ -648,5 +648,13 @@ test('CSV keeps incomplete coverage and unavailable counts while exporting separ
   const [header,row]=(await exported.text()).trim().split('\r\n').map(line=>line.split(','));
   assert.deepEqual(header.slice(-3),['"scanned_at"','"unavailable_entries"','"auto_ready"']);
   assert.equal(row[7],'"false"');assert.deepEqual(row.slice(-2),['"2"','"true"']);
-  assert.equal(link.download,'whitewolf-scan.csv');assert.equal(clicks,1);assert.deepEqual(adapter.writes,[]);
+  assert.equal(link.download,csvFileName('tester',c.getSnapshot().scannedAt));assert.match(link.download,/^whitewolf-tester-\d{8}-\d{4}\.csv$/);
+  assert.equal(clicks,1);assert.deepEqual(adapter.writes,[]);
+});
+
+test('CSV file names use the scan time and only the X username alphabet',()=>{
+  const at=new Date(2026,9,3,7,5).getTime();
+  assert.equal(csvFileName('Alice_01',at),'whitewolf-Alice_01-20261003-0705.csv');
+  assert.equal(csvFileName('@a/b..c\\d',at),'whitewolf-abcd-20261003-0705.csv');
+  assert.equal(csvFileName(undefined,null,at),'whitewolf-20261003-0705.csv');
 });

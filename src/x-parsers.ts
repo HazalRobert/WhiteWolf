@@ -1,6 +1,6 @@
 /**
  * All runtime helpers stay inside this function so it can be serialized into an X page.
- * person/viewer/userGraphql return Person; relationFromUser accepts a raw User result;
+ * person/viewer/userGraphql return Person (viewer may add followingCount); relationFromUser accepts a raw User result;
  * followingGraphql returns { users, nextCursor, relations, unavailableCount? }. No browser access is used.
  */
 export function parseXPayload(
@@ -111,9 +111,12 @@ export function parseXPayload(
   }
   if (kind === 'viewer') {
     const viewer = object(envelopeData().viewer, 'data.viewer');
-    const result = person(object(viewer.user_results, 'data.viewer.user_results').result, 'data.viewer.user_results.result');
+    const raw = object(viewer.user_results, 'data.viewer.user_results').result;
+    const result = person(raw, 'data.viewer.user_results.result');
     expectId(result.id, context.expectedId ?? context.actorId);
-    return result;
+    // A display-only progress estimate. Absent or malformed counts are omitted, never guessed or rejected.
+    const count = optionalObject(userResult(raw).legacy, 'User.legacy').friends_count;
+    return typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 10_000_000 ? { ...result, followingCount: count } : result;
   }
   if (kind === 'userGraphql') {
     const result = person(object(envelopeData().user, 'data.user').result, 'data.user.result');

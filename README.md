@@ -64,6 +64,7 @@ npx pnpm test:design
 node scripts/scan-pause-browser.mjs
 node scripts/unavailable-browser.mjs
 node scripts/themed-layout-check.mjs
+node scripts/stability-browser.mjs
 node tests/theme-image-browser.mjs
 ```
 

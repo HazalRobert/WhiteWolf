@@ -11,7 +11,7 @@ import { fixtureActor, fixtureIds, installXFixture } from './x-fixture.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = process.cwd(), dist = path.join(root, 'dist');
-const output = path.join(root, 'qa/unavailable-1.2.4');
+const output = path.join(root, 'qa/unavailable-1.3');
 const executablePath = process.env.BROWSER_EXECUTABLE || chromium.executablePath();
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -30,7 +30,7 @@ const until = async (predicate, message) => {
 await mkdir(output, { recursive: true });
 const manifestBytes = await readFile(path.join(dist, 'manifest.json'));
 const manifest = JSON.parse(manifestBytes.toString('utf8'));
-assert.equal(manifest.version, '1.2.4', 'Build v1.2.4 before running this script.');
+assert.equal(manifest.version, '1.3', 'Build v1.3 before running this script.');
 assert.equal(manifest.host_permissions, undefined, 'The delivery manifest must not grant required host permissions.');
 report.manifestSha256 = digest(manifestBytes);
 report.distIndexSha256 = digest(await readFile(path.join(dist, 'index.html')));
@@ -93,6 +93,8 @@ const resetPresentation = async () => {
 // The same control reads "preview" at ready and "recheck and continue" after pause.
 const autoButton = () => ui.locator('.auto-control > button');
 const confirmAutomatic = async expectedCount => {
+  // Actions stay disabled until a preceding whitelist save settles; then the run must be available.
+  await ui.waitForFunction(() => document.querySelector('.auto-control > button')?.disabled === false, null, { timeout: 5000 });
   assert.equal(await autoButton().isEnabled(), true);
   await autoButton().click(); await ui.locator('dialog[open]').waitFor();
   assert.equal(Number(await ui.locator('dialog .preview-stat strong').innerText()), expectedCount);
@@ -320,7 +322,7 @@ try {
     assert.equal(posts.length, 3); assert.ok(posts.every(request => ['101', '103'].includes(request.targetId)));
     assert.equal(digest(await readFile(path.join(dist, 'manifest.json'))), report.manifestSha256);
     assert.equal(digest(await readFile(path.join(dist, 'index.html'))), report.distIndexSha256);
-    assert.equal((await ui.locator('.footer-version').innerText()).includes('v1.2.4'), true);
+    assert.equal((await ui.locator('.footer-version').innerText()).includes('v1.3'), true);
     return { realXRequests: 0, syntheticWrites: fixture.writes.length, pageErrors: 0, sourceManifestUnchanged: true };
   });
   report.passed = true;

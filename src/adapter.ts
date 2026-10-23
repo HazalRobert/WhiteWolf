@@ -200,7 +200,7 @@ export class ChromeAdapter implements Adapter {
     if (!this.actorId) throw new Error('CANCELLED: Connect to X before continuing.');
     return this.actorId;
   }
-  private command<T>(operation: Exclude<PageOperation, { kind: 'connect' | 'cancel' }>): Promise<T> {
+  private command<T>(operation: Exclude<PageOperation, { kind: 'connect' | 'cancel' | 'probe' }>): Promise<T> {
     if (this.cancelled || !this.bootId || !this.sessionId) return Promise.reject(new Error('CANCELLED: Reconnect before continuing.'));
     if (operation.actorId !== this.actorId) return Promise.reject(new Error('ACCOUNT_CHANGED: This command belongs to another account.'));
     return this.send('COMMAND', { bootId: this.bootId, sessionId: this.sessionId, operation }, operation.kind === 'unfollow' || operation.kind === 'followAuthor');

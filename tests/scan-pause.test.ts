@@ -139,11 +139,16 @@ test('resume verifies the same account and discards the checkpoint on account ch
   assert.deepEqual(adapter.cursors,['-1','page-two|opaque']);await c.resumeScan();assert.equal(adapter.connectCalls,2);
 });
 
-test('unexpected session loss cannot create a resumable scan even after an explicit pause',async()=>{
+test('unexpected session loss keeps committed pages resumable and resume re-verifies the account',async()=>{
   const {c,adapter,reply,running}=await pendingSecondPage();c.pause();adapter.loseSession();
   reply.resolve({users:[],nextCursor:'0'});await running;
-  assert.match(c.getSnapshot().error!,/^WORKER_RESTART:/);assert.equal(c.getSnapshot().canResumeScan,false);
-  await c.resumeScan();assert.equal(adapter.connectCalls,1);assert.equal(c.getSnapshot().rows.length,2);
+  assert.match(c.getSnapshot().error!,/^WORKER_RESTART:/);assert.equal(c.getSnapshot().canResumeScan,true);
+  assert.equal(c.getSnapshot().pages,1);assert.equal(c.getSnapshot().rows.length,2);assert.equal(c.getSnapshot().connected,false);
+  adapter.page=async()=>({users:people(3,1),nextCursor:'0'});await c.resumeScan();
+  assert.equal(adapter.connectCalls,2);assert.deepEqual(adapter.identityCalls,['999','999','999']);
+  assert.deepEqual(adapter.cursors,['-1','page-two|opaque','page-two|opaque']);
+  assert.deepEqual(c.getSnapshot().rows.map(row=>row.id),['1','2','3']);assert.equal(c.getSnapshot().complete,true);
+  assert.equal(c.getSnapshot().canResumeScan,false);assert.equal(c.getSnapshot().error,null);assert.deepEqual(adapter.writes,[]);
 });
 
 test('terminal late errors discard the checkpoint rather than enabling a retry',async()=>{

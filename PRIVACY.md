@@ -1,7 +1,7 @@
 # WhiteWolf Privacy Policy / 隐私政策
 
-Effective date / 生效日期: 2026-10-18  
-Applies to / 适用版本: WhiteWolf 1.2.2  
+Effective date / 生效日期: 2026-10-23  
+Applies to / 适用版本: WhiteWolf 1.3  
 Maintainer / 维护者: [HazalRobert](https://github.com/HazalRobert)  
 Contact / 联系: [WhiteWolf GitHub Issues](https://github.com/HazalRobert/WhiteWolf/issues)
 
@@ -15,12 +15,12 @@ WhiteWolf reviews your X following relationships and performs only the follow/un
 
 Requests for following lists, relationship checks and explicitly initiated relationship operations go directly from the selected X page to `https://x.com` or `https://api.x.com`, using that page's existing signed-in session. The page adapter reads the X account marker and CSRF cookie and uses current web-client query metadata and request-signing filters. Session cookies are sent to X by the browser as required for those requests. CSRF values, web bearer credentials, request signatures and native client objects stay in the X page context; they are not returned to the extension interface, written to extension storage, included in exports or sent to the developer. WhiteWolf does not ask for your password or a personal API key, and it does not export the full cookie store.
 
-Showing an avatar requests the HTTPS image URL supplied by X and can contact X's image service or the image host named in that response. Such requests disclose normal connection information, such as your IP address, to that service. X handles requests made to its services under its own policies. WhiteWolf has no developer-operated data server, analytics, advertising, data-sale mechanism or automatic diagnostic upload.
+Showing an avatar requests the HTTPS image URL supplied by X, or a larger rendition of the same profile image on X's image host (`pbs.twimg.com`) for sharper display, and can contact X's image service or the image host named in that response. Such requests disclose normal connection information, such as your IP address, to that service. X handles requests made to its services under its own policies. WhiteWolf has no developer-operated data server, analytics, advertising, data-sale mechanism or automatic diagnostic upload.
 
 ### Local storage and retention
 
 - Extension-local `chrome.storage.local` stores the interface language, manual/automatic mode, interval and batch settings, account-specific whitelists, the latest 500 activity records, and account-specific sets of target IDs for unresolved operations. Activity records include a timestamp, acting account ID, target ID/username, action and result. Unresolved IDs are separate from the 500-record log limit, to prevent accidental replay of an unconfirmed action.
-- Scan lists, relationship snapshots and scan checkpoints are kept in the current control page's memory. Closing or refreshing that page removes the scan checkpoint; account changes and session failures invalidate it. These lists are not automatically exported or synchronized to a developer service.
+- Scan lists, relationship snapshots and scan checkpoints are kept in the current control page's memory. Closing or refreshing that page removes the scan checkpoint. Account changes, clearing local data and data-integrity errors invalidate it. After a transient interruption, such as a rate limit, network failure or lost connection, pages already read stay in that memory until you resume the scan (after the account is verified again) or restart it. These lists are not automatically exported or synchronized to a developer service.
 - A CSV is created only when you choose to export it and is then retained wherever you save it.
 - Custom themes use a separate local key, `whitewolf_themes_v1`. It stores the selected theme, up to five custom raster images, their names, positions, zoom and opacity. Theme previews are not persisted until you apply or save them.
 - The local web demonstration uses browser `localStorage` instead of extension storage. It uses synthetic account data; any custom themes you create there remain in that local site's browser storage.
@@ -59,12 +59,12 @@ WhiteWolf 用于检查你在 X 上的关注关系，并执行由你主动发起�
 
 关注列表、关系核对及主动发起的关注/取消关注请求，使用所选 X 页面的现有登录会话，直接发往 `https://x.com` 或 `https://api.x.com`。页面适配器读取 X 账号标记及 CSRF Cookie，并使用当前网页客户端的查询元数据及请求签名过滤器。浏览器按请求需要将会话 Cookie 发送给 X。CSRF 值、Web bearer 凭据、请求签名与原生客户端对象留在 X 页面上下文，不返回扩展界面、不写入扩展存储、不包含在导出中、不发送给开发者。扩展不要求账号密码或个人 API 密钥，也不导出完整 Cookie 存储。
 
-显示头像会请求 X 返回的 HTTPS 图片地址，可能访问 X 的图片服务或响应指定的图片主机，并向该服务暴露 IP 地址等正常网络连接信息。X 对其服务收到的请求按自身政策处理。WhiteWolf 没有开发者数据服务器、广告、统计上报、数据出售机制或自动诊断上传。
+显示头像会请求 X 返回的 HTTPS 图片地址，或同一头像在 X 图片主机（`pbs.twimg.com`）上的较大尺寸版本以便清晰显示，可能访问 X 的图片服务或响应指定的图片主机，并向该服务暴露 IP 地址等正常网络连接信息。X 对其服务收到的请求按自身政策处理。WhiteWolf 没有开发者数据服务器、广告、统计上报、数据出售机制或自动诊断上传。
 
 ### 本地保存与保留期限
 
 - `chrome.storage.local` 保存语言、手动/自动模式、间隔与批次设置、按账号区分的白名单、最近 500 条操作记录及按账号区分的未确认操作目标 ID 集合。记录包含时间、执行账号 ID、目标 ID/用户名、动作与结果。未确认 ID 独立于 500 条日志限制保存，以防止意外重复执行未确认操作。
-- 扫描名单、关系快照及扫描断点保留在当前控制页面内存中。关闭或刷新页面会失去断点，切换账号及会话异常也会使其失效。名单不自动导出或同步到开发者服务。
+- 扫描名单、关系快照及扫描断点保留在当前控制页面内存中。关闭或刷新页面会失去断点；切换账号、清除本地数据及数据结构异常会使其失效。遇到限流、网络失败或连接中断等暂时性中断时，已读取的页面仍保留在该内存中，直到你在重新核验账号后继续扫描，或重新开始扫描。名单不自动导出或同步到开发者服务。
 - CSV 仅在你选择导出时生成，之后保存在你选择的位置。
 - 自定义主题使用独立本地键 `whitewolf_themes_v1`，保存当前主题、最多五套图片及名称、位置、缩放、不透明度。预览在应用或保存前不持久写入。
 - 本地网页演示使用浏览器 `localStorage`，以合成账号数据运行；在演示中保存的自定义皮肤也留在该本地站点的浏览器存储中。

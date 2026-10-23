@@ -55,7 +55,8 @@ test('whitelists use actor and immutable ID; unresolved handles match case-insen
 
 type FilterMode = 'normal' | 'double' | 'doublePost' | 'dedupe' | 'latequeue' | 'lateAfterReturn' | 'badCsrf' | 'badDelegate' | 'throwSpoofed';
 type MockOptions = { followsBack?: boolean; lookupMissingBoolean?: boolean; status?: number; failAfterWrite?: boolean;
-  missingNative?: boolean; viewerId?: string; filterMode?: FilterMode; nonJson?: boolean };
+  missingNative?: boolean; viewerId?: string; filterMode?: FilterMode; nonJson?: boolean;
+  rateLimitReset?: string; viewerLegacy?: Record<string, unknown>; screenNameBody?: unknown };
 type RecordedRequest = { url: URL; method: string; headers: Headers; body: string | null };
 
 function mockPage(options: MockOptions = {}) {
@@ -70,7 +71,7 @@ function mockPage(options: MockOptions = {}) {
     __typename: 'User', rest_id: id, core: { name: `Synthetic User ${id}`, screen_name: handle },
     relationship_perspectives: { following: following.get(id) ?? false, ...(options.lookupMissingBoolean ? {} : { followed_by: options.followsBack ?? false }) },
   });
-  const viewerPayload = () => ({ data: { viewer: { user_results: { result: modernUser(options.viewerId ?? actorId) } } } });
+  const viewerPayload = () => ({ data: { viewer: { user_results: { result: { ...modernUser(options.viewerId ?? actorId), ...(options.viewerLegacy ? { legacy: options.viewerLegacy } : {}) } } } } });
   const fakeNativeResponse = (request: NativeRequest): NativeResponse => ({ body: JSON.stringify(viewerPayload()), status: 200, headers: { 'content-type': 'application/json' }, request });
   let releaseQueue!: () => void, notifyQueued!: () => void;
   const queueGate = new Promise<void>(resolve => { releaseQueue = resolve; });
@@ -145,7 +146,7 @@ function mockPage(options: MockOptions = {}) {
       assert.equal(headers.get('authorization'), 'Bearer synthetic-native-token');
       assert.equal(headers.get('x-csrf-token'), 'synthetic-csrf');
       if (options.failAfterWrite && writes.length > 0) throw new Error('Synthetic connection failure after write.');
-      if (options.status) return new Response('{}', { status: options.status, headers: { 'retry-after': '60' } });
+      if (options.status) return new Response('{}', { status: options.status, headers: { 'retry-after': '60', ...(options.rateLimitReset === undefined ? {} : { 'x-rate-limit-reset': options.rateLimitReset }) } });
       if (options.nonJson) return new Response('<html>synthetic challenge</html>', { status: 200, headers: { 'content-type': 'text/html' } });
       const operation = graphRoutes.get(url.pathname);
       if (operation) {
@@ -160,6 +161,7 @@ function mockPage(options: MockOptions = {}) {
           return Response.json({ data: { user: { result: modernUser(variables.userId as string) } } });
         }
         if (operation === 'UserByScreenName') {
+          if (options.screenNameBody !== undefined) return Response.json(options.screenNameBody);
           assert.ok(variables.screen_name === 'MagicalStocker' || variables.screen_name === 'user2');
           assert.equal(variables.withGrokTranslatedBio,false);assert.deepEqual(Object.keys(variables).sort(),['screen_name','withGrokTranslatedBio']);
           return Response.json({ data: { user: { result: modernUser(variables.screen_name === 'MagicalStocker' ? '3' : '2') } } });
@@ -260,6 +262,44 @@ test('account switching and cancellation invalidate a prepared write', async () 
 test('429 stops after one native request without inheriting retry filters', async () => {
   const page = mockPage({ status: 429 }), result = await page.run({ kind: 'connect' });
   assert.equal(result.ok, false); if (!result.ok) assert.match(result.error, /^RATE_LIMIT:/); assert.equal(page.requests.length, 1); assert.equal(page.writes(), 0);
+});
+test('429 reports a plausible X reset time without retrying', async () => {
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  const page = mockPage({ status: 429, rateLimitReset: String(reset) }), result = await page.run({ kind: 'connect' });
+  assert.equal(result.ok, false);
+  if (!result.ok) { assert.match(result.error, /^RATE_LIMIT: Viewer GET .*HTTP 429; resetAt=/); assert.ok(result.error.includes(`resetAt=${new Date(reset * 1000).toISOString()};`)); }
+  assert.equal(page.requests.length, 1); assert.equal(page.writes(), 0);
+  for (const value of ['', 'soon', '1.5', String(reset * 1000), String(Math.floor(Date.now() / 1000) - 3600), String(Math.floor(Date.now() / 1000) + 3 * 86400)]) {
+    const other = mockPage({ status: 429, rateLimitReset: value }), failed = await other.run({ kind: 'connect' });
+    assert.equal(failed.ok, false); if (!failed.ok) { assert.match(failed.error, /^RATE_LIMIT:/); assert.doesNotMatch(failed.error, /resetAt=/); }
+  }
+});
+test('Viewer adds only a valid following count to the verified account', async () => {
+  const counted = await mockPage({ viewerLegacy: { friends_count: 4321 } }).run({ kind: 'connect' });
+  assert.equal(counted.ok, true); if (counted.ok) assert.deepEqual(plain(counted.data), { id: '1', handle: 'user1', name: 'Synthetic User 1', followingCount: 4321 });
+  for (const friends_count of [-1, 1.5, '12', null, Number.MAX_SAFE_INTEGER + 2, 10_000_001]) {
+    const result = await mockPage({ viewerLegacy: { friends_count } }).run({ kind: 'connect' });
+    assert.equal(result.ok, true, JSON.stringify(result)); if (result.ok) assert.equal('followingCount' in (result.data as object), false);
+  }
+});
+test('unknown and unavailable usernames are NOT_FOUND without a write or session failure code', async () => {
+  for (const body of [{ data: {} }, { data: { user: null } }, { data: { user: {} } }, { data: { user: { result: null } } },
+    { data: { user: { result: { __typename: 'UserUnavailable', reason: 'Suspended' } } } }]) {
+    const page = mockPage({ screenNameBody: body }); await page.run({ kind: 'connect' });
+    const result = await page.run({ kind: 'resolve', actorId: '1', handle: 'missing_user' });
+    assert.equal(result.ok, false, JSON.stringify(body)); if (!result.ok) assert.equal(result.error, 'NOT_FOUND: @missing_user is unavailable or does not exist on X.');
+    assert.equal(page.writes(), 0);
+  }
+  for (const body of [{ data: { user: { result: { __typename: 'Unexpected' } } } }, { data: { user: { other: true } } }, { data: { user: 'x' } }, {}]) {
+    const page = mockPage({ screenNameBody: body }); await page.run({ kind: 'connect' });
+    const result = await page.run({ kind: 'resolve', actorId: '1', handle: 'missing_user' });
+    assert.equal(result.ok, false, JSON.stringify(body)); if (!result.ok) assert.match(result.error, /^SCHEMA:/);
+  }
+});
+test('the author follow never writes when the author name is unavailable', async () => {
+  const page = mockPage({ screenNameBody: { data: {} } }); await page.run({ kind: 'connect' });
+  const result = await page.run({ kind: 'followAuthor', actorId: '1' });
+  assert.equal(result.ok, false); if (!result.ok) assert.match(result.error, /^NOT_FOUND: @MagicalStocker/); assert.equal(page.writes(), 0);
 });
 test('404 identifies the failed read without fallback requests or any POST', async () => {
   const page = mockPage({ status: 404 }), result = await page.run({ kind: 'connect' });

@@ -58,6 +58,17 @@ test('Viewer and User envelopes use their exact paths and validate expected iden
   assert.throws(() => parseXPayload('viewer', user), /SCHEMA:/);
   assert.throws(() => parseXPayload('userGraphql', viewer), /SCHEMA:/);
 });
+test('Viewer exposes a validated following count only as an optional estimate', () => {
+  const viewer = (legacy: unknown) => ({ data: { viewer: { user_results: { result: { ...modernUser(), legacy } } } } });
+  assert.equal((parseXPayload('viewer', viewer({ friends_count: 0 }), { actorId: '101' }) as { followingCount?: number }).followingCount, 0);
+  assert.equal((parseXPayload('viewer', viewer({ friends_count: 5000 }), { actorId: '101' }) as { followingCount?: number }).followingCount, 5000);
+  const wrapped = { data: { viewer: { user_results: { result: { __typename: 'UserWithVisibilityResults', user: { ...modernUser(), legacy: { friends_count: 7 } } } } } } };
+  assert.equal((parseXPayload('viewer', wrapped, { actorId: '101' }) as { followingCount?: number }).followingCount, 7);
+  for (const friends_count of [-1, 2.5, '20', null, undefined, Infinity, 10_000_001]) {
+    assert.deepEqual(parseXPayload('viewer', viewer({ friends_count }), { actorId: '101' }), parseXPayload('person', modernUser()));
+  }
+  assert.equal('followingCount' in (parseXPayload('userGraphql', { data: { user: { result: { ...modernUser(), legacy: { friends_count: 9 } } } } }) as object), false);
+});
 test('GraphQL error envelopes never turn partial data into accepted users', () => {
   const payload = { data: { user: { result: modernUser() } }, errors: [{ message: 'Synthetic error' }] };
   assert.throws(() => parseXPayload('userGraphql', payload), /partial data/);

@@ -5,11 +5,19 @@ import { isValidCursor } from './cursor';
 export const isCandidate = (row: Row) => row.relation.following === true && row.relation.followedBy === false && row.outcome === 'pending';
 export const isAutoReady = (state: Pick<AppState,'complete'|'autoReady'>) => state.autoReady ?? state.complete;
 export const isWhitelisted = (row: Pick<Row,'id'|'handle'>, list: WhiteEntry[]) => list.some(e => e.id ? e.id===row.id : e.handle.toLowerCase()===row.handle.toLowerCase());
+/** Transport, rate-limit and session failures leave committed scan pages valid; a resume re-verifies the account first. */
+export const isResumableScanError = (message: string) => /^(CANCELLED|RATE_LIMIT|NETWORK|HTTP|AUTH|API_UNAVAILABLE|WORKER_RESTART|TAB_REQUIRED|TAB_PERMISSION|NOT_CONNECTED|BUSY):/.test(message);
 export const csvCell=(value:unknown)=>{
   let text=String(value??'');
   if(/^[\s\u0000-\u001f]*[=+@\-]/.test(text))text="'"+text;
   return '"'+text.replace(/"/g,'""')+'"';
 };
+/** Local scan time keeps repeated exports distinguishable; the handle is reduced to X's username alphabet. */
+export function csvFileName(handle: string | undefined, scannedAt: number | null, now = Date.now()): string {
+  const date = new Date(scannedAt ?? now), two = (value: number) => String(value).padStart(2, '0');
+  const account = (handle ?? '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 15);
+  return `whitewolf-${account ? account + '-' : ''}${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}-${two(date.getHours())}${two(date.getMinutes())}.csv`;
+}
 export function parseHandles(text: string): string[] {
   const tokens = text.split(/[\s,，;；]+/).filter(Boolean).map(v=>v.replace(/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//i,'').replace(/^@/,'').replace(/\/$/,''));
   if(!tokens.length || tokens.some(v=>!/^\w{1,15}$/.test(v))) throw new Error('WHITELIST: Invalid username');
@@ -43,11 +51,14 @@ export class Controller implements Actions {
   constructor(private adapter:Adapter,private repository:Repository, demo=false,private readDelay=900) {
     this.state={demo,connected:false,account:null,rows:[],phase:'idle',complete:false,autoReady:false,scannedAt:null,pages:0,checked:0,unavailableCount:0,whitelist:[],settings:{...this.saved.settings},error:null,message:demo?'statusDemo':'statusIdle',currentId:null,logs:[],authorFollowed:false,activeOperation:null,pausePending:false,canResumeScan:false};
     adapter.setSessionLostListener?.(message=>{
-      this.sessionLoss=message;this.stopped=true;this.scanCheckpoint=null;this.wake?.();
+      this.sessionLoss=message;this.stopped=true;this.wake?.();
+      // Committed scan pages stay valid after a lost transport. They resume only through an
+      // explicit action that reconnects and re-verifies the same account before any cursor is used.
+      if(this.scanCheckpoint)this.scanCheckpoint.paused=true;
       // A transport closure after an already reported terminal error is secondary.
       // Preserve the actionable operation failure while still stopping all work.
       const error=!this.state.connected&&this.state.error?this.state.error:message;
-      this.patch({connected:false,error,phase:this.busy?this.state.phase:'error',message:'statusPaused',canResumeScan:false});
+      this.patch({connected:false,error,phase:this.busy?this.state.phase:'error',message:'statusPaused',canResumeScan:!this.busy&&!!this.scanCheckpoint?.paused});
     });
   }
   getSnapshot=()=>this.state;
@@ -95,9 +106,17 @@ export class Controller implements Actions {
       const sessionInvalidated=/^(RATE_LIMIT|AUTH|ACCOUNT_CHANGED|SCHEMA|NETWORK|UNCERTAIN|HTTP|API_UNAVAILABLE|WORKER_RESTART|NOT_CONNECTED|TAB_REQUIRED|TAB_PERMISSION):/.test(message);
       if(sessionInvalidated)this.adapter.cancel();
       const cancelled=message.startsWith('CANCELLED:');
-      if(!(cancelled&&!this.sessionLoss&&operation==='scan'&&this.scanCheckpoint?.paused))this.scanCheckpoint=null;
+      // An explicit pause keeps its checkpoint. A transient failure keeps one only when it holds committed
+      // pages; data-integrity failures (SCHEMA/INCOMPLETE) and account changes always discard it.
+      // Other operations never discard a paused scan unless the connected account changed.
+      const checkpoint=this.scanCheckpoint;
+      const keep=!!checkpoint&&(operation==='scan'
+        ?(cancelled&&!this.sessionLoss&&checkpoint.paused)||(isResumableScanError(message)&&checkpoint.pages>0)
+        :!message.startsWith('ACCOUNT_CHANGED:'));
+      if(keep)checkpoint!.paused=true;
+      else this.scanCheckpoint=null;
       this.patch({phase:cancelled?'paused':'error',message:'statusPaused',error:cancelled&&!this.sessionLoss?null:message,connected:!sessionInvalidated&&this.state.connected});
-    }finally{this.busy=false;this.patch({currentId:null,activeOperation:null,pausePending:false,canResumeScan:!!this.scanCheckpoint?.paused});}
+    }finally{this.busy=false;this.patch({currentId:null,activeOperation:null,pausePending:false,runProgress:null,canResumeScan:!!this.scanCheckpoint?.paused});}
   }
   connect=async()=>this.run(async()=>{this.patch({phase:'connecting'});await this.bind();this.patch({phase:'idle',message:'statusConnected'});});
   scan=async()=>this.run(async()=>{
@@ -202,7 +221,7 @@ export class Controller implements Actions {
     if(action==='unfollow'){
       const unresolved=this.unresolvedIds(entry.actorId);
       if(result==='intent'||result==='uncertain')unresolved.add(target.id);
-      else if(['verified','skipped','stopped'].includes(result))unresolved.delete(target.id);
+      else if(['verified','skipped','stopped','rechecked'].includes(result))unresolved.delete(target.id);
       this.saved.unresolved[entry.actorId]=[...unresolved];
     }
     this.patch({logs:[...this.state.logs,entry].slice(-500)});await this.persist();
@@ -234,14 +253,30 @@ export class Controller implements Actions {
     }finally{this.patch({currentId:null});}
   }
   unfollow=async(id:string)=>{if(this.scanCheckpoint)return;await this.run(async()=>{await this.bind();this.patch({phase:'running',message:'statusRunning'});await this.perform(id,false);if(!this.stopped)this.patch({phase:'ready'});},'manual');};
+  /** Resolve an uncertain outcome with one fresh read. It never writes; a still-followed account only becomes pending again. */
+  recheck=async(id:string)=>{if(this.scanCheckpoint)return;await this.run(async()=>{
+    await this.bind();const actor=this.actor();const row=this.state.rows.find(r=>r.id===id);
+    if(!row||row.outcome!=='uncertain')return;
+    this.patch({phase:'running',message:'statusRunning',currentId:id});
+    await this.adapter.identity(actor.id);this.assertActive();
+    const relations=await this.adapter.relations(actor.id,[id]);this.assertActive();
+    const fresh=relations.length===1&&relations[0].id===id?relations[0]:null;
+    if(!fresh||typeof fresh.following!=='boolean'||typeof fresh.followedBy!=='boolean')throw new Error('SCHEMA: Current relationship unknown');
+    if(!fresh.following){this.updateRow(id,{relation:fresh,outcome:'unfollowed'});await this.audit(row,'unfollow','verified');this.patch({message:'statusRecheckUnfollowed'});}
+    else if(fresh.followedBy){this.updateRow(id,{relation:fresh,outcome:'skipped'});await this.audit(row,'unfollow','skipped');this.patch({message:'statusSkipped'});}
+    else{this.updateRow(id,{relation:fresh,outcome:'pending'});await this.audit(row,'unfollow','rechecked');this.patch({message:'statusRechecked'});}
+    if(!this.stopped)this.patch({phase:'ready'});
+  },'manual');};
   startAuto=async()=>{if(this.scanCheckpoint)return;await this.run(async()=>{
     if(!isAutoReady(this.state))throw new Error('INCOMPLETE: Complete a scan before automatic mode');
     await this.bind();await this.persist();this.assertActive();
     const queue=this.state.rows.filter(r=>isCandidate(r)&&!isWhitelisted(r,this.state.whitelist)).slice(0,this.state.settings.batchLimit).map(r=>r.id);
-    this.patch({phase:'running',message:'statusRunning'});
+    this.patch({phase:'running',message:'statusRunning',runProgress:{total:queue.length,processed:0,nextAt:null}});
     for(let i=0;i<queue.length;i++){
       this.assertActive();await this.perform(queue[i],true);this.assertActive();
-      if(i<queue.length-1)await this.wait(this.state.settings.intervalSeconds*1000);
+      const pause=i<queue.length-1?this.state.settings.intervalSeconds*1000:0;
+      this.patch({runProgress:{total:queue.length,processed:i+1,nextAt:pause?Date.now()+pause:null}});
+      if(pause)await this.wait(pause);
     }
     this.patch({phase:'ready',message:'statusDone'});
   },'auto');};
@@ -265,7 +300,7 @@ export class Controller implements Actions {
   exportCsv=()=>{
     const lines=[['id','handle','name','following','followed_by','outcome','whitelisted','scan_complete','scanned_at','unavailable_entries','auto_ready'],...this.state.rows.map(r=>[r.id,r.handle,r.name,r.relation.following,r.relation.followedBy,r.outcome,isWhitelisted(r,this.state.whitelist),this.state.complete,this.state.scannedAt?new Date(this.state.scannedAt).toISOString():'',this.state.unavailableCount??0,isAutoReady(this.state)])];
     const url=URL.createObjectURL(new Blob(['\uFEFF'+lines.map(r=>r.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));
-    const a=document.createElement('a');a.href=url;a.download='whitewolf-scan.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const a=document.createElement('a');a.href=url;a.download=csvFileName(this.state.account?.handle,this.state.scannedAt);a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   clearLocalData=async()=>{if(this.busy)return;this.adapter.cancel();this.scanCheckpoint=null;await this.saveChain;this.saved=emptySaved();this.patch({settings:{...this.saved.settings},connected:false,account:null,rows:[],complete:false,autoReady:false,scannedAt:null,pages:0,checked:0,unavailableCount:0,whitelist:[],logs:[],authorFollowed:false,phase:'idle',error:null,message:'statusDataCleared',activeOperation:null,pausePending:false,canResumeScan:false});if(this.repository.clear)await this.repository.clear(this.saved);else await this.persist();};
 }
