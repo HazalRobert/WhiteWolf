@@ -3,11 +3,12 @@ import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { brandIconSvg, ICON_VARIANTS } from '../src/brand-mark.ts';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = process.cwd(), dist = path.join(root, 'dist'), output = path.join(root, 'qa/icon-1.3');
-const oldIcons = process.env.OLD_ICON_DIR || null;
+const oldIcons = process.env.OLD_ICON_DIR || null, oldLabel = process.env.OLD_ICON_LABEL || '旧版';
 const executablePath = process.env.BROWSER_EXECUTABLE || chromium.executablePath();
 const sizes = [16, 20, 24, 32, 48, 128];
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -39,7 +40,10 @@ try {
       fixtures[size] = 'data:image/png;base64,' + bytes.toString('base64');
       report.pngs.push({ size, width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), bitDepth: bytes[24], colorType: bytes[25], bytes: bytes.length, sha256: digest(bytes) });
     }
-    if (oldIcons) for (const size of [16, 32, 128]) oldFixtures[size] = 'data:image/png;base64,' + (await readFile(path.join(oldIcons, size + '.png'))).toString('base64');
+    if (oldIcons) for (const size of sizes) {
+      try { oldFixtures[size] = 'data:image/png;base64,' + (await readFile(path.join(oldIcons, size + '.png'))).toString('base64'); }
+      catch (error) { if ([16, 32, 128].includes(size)) throw error; }
+    }
     return { sizes };
   });
   await test('manifest-registers-all-six-icon-sizes-without-permission-changes', async () => {
@@ -117,25 +121,82 @@ try {
       return results;
     }, fixtures);
     for (const result of pixels) {
-      assert.deepEqual(result.corners, [0, 0, 0, 0]); assert.ok(result.transparent > 0); assert.ok(result.opaque > result.size ** 2 * .55); assert.ok(result.white > result.size ** 2 * .15);
+      assert.deepEqual(result.corners, [0, 0, 0, 0]); assert.ok(result.transparent > 0); assert.ok(result.opaque > result.size ** 2 * .55); assert.ok(result.white > result.size ** 2 * .08);
     }
     report.alpha = pixels;
     return { checkedSizes: pixels.map(item => item.size) };
   });
+  await comparison.evaluate(() => {
+    window.iconPixels = async (source, size) => {
+      const image = new Image(); image.src = source; await image.decode();
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = size;
+      const drawing = canvas.getContext('2d'); drawing.drawImage(image, 0, 0, size, size);
+      return drawing.getImageData(0, 0, size, size).data;
+    };
+    // Mean and largest per-channel difference of premultiplied RGBA, on a 0-255 scale.
+    window.iconDifference = (a, b) => {
+      let total = 0, max = 0;
+      for (let at = 0; at < a.length; at += 4) for (let channel = 0; channel < 4; channel++) {
+        const value = channel === 3 ? Math.abs(a[at + 3] - b[at + 3]) : Math.abs(a[at + channel] * a[at + 3] - b[at + channel] * b[at + 3]) / 255;
+        total += value; max = Math.max(max, value);
+      }
+      return { mean: total / a.length, max };
+    };
+  });
+  const svgSource = (size, id) => 'data:image/svg+xml;base64,' + Buffer.from(brandIconSvg(size, ICON_VARIANTS[size], id)).toString('base64');
+  await test('png-files-match-the-shared-brand-drawing', async () => {
+    const drift = await comparison.evaluate(async ({ sources, pngs }) => {
+      const results = [];
+      for (const [size, source] of Object.entries(sources)) results.push({ size: Number(size), ...window.iconDifference(await window.iconPixels(source, Number(size)), await window.iconPixels(pngs[size], Number(size))) });
+      return results;
+    }, { sources: Object.fromEntries(sizes.map(size => [size, svgSource(size, 'ww')])), pngs: fixtures });
+    for (const result of drift) assert.ok(result.mean < 1 && result.max < 40, `${result.size}.png no longer matches src/brand-mark.ts; run node scripts/whitewolf-icons.mjs (mean ${result.mean}, max ${result.max})`);
+    report.drift = drift;
+    return { largestMeanDifference: Math.max(...drift.map(item => item.mean)) };
+  });
+  await test('wolf-mark-is-centred-and-fills-71-to-75-percent-of-the-tile-height', async () => {
+    const marks = await comparison.evaluate(icons => icons.map(([size, markup]) => {
+      const host = document.createElement('div'); host.innerHTML = markup; document.body.append(host);
+      const group = host.querySelector('g'), box = group.getBBox(), matrix = group.getCTM();
+      const x = [box.x, box.x + box.width].map(value => matrix.a * value + matrix.e), y = [box.y, box.y + box.height].map(value => matrix.d * value + matrix.f);
+      host.remove();
+      return { size, width: (x[1] - x[0]) / size, height: (y[1] - y[0]) / size, offsetX: ((x[0] + x[1]) / 2 - size / 2) / size, offsetY: ((y[0] + y[1]) / 2 - size / 2) / size };
+    }), sizes.map(size => [size, brandIconSvg(size, ICON_VARIANTS[size], 'mark' + size)]));
+    for (const mark of marks) {
+      assert.ok(mark.height >= .7 && mark.height <= .76, `${mark.size}px wolf height is ${mark.height} of the tile`);
+      assert.ok(mark.width >= .58 && mark.width <= .64, `${mark.size}px wolf width is ${mark.width} of the tile`);
+      assert.ok(Math.abs(mark.offsetX) <= .01 && Math.abs(mark.offsetY) <= .01, `${mark.size}px wolf is off centre`);
+    }
+    report.marks = marks;
+    return { heights: marks.map(mark => +mark.height.toFixed(4)), widths: marks.map(mark => +mark.width.toFixed(4)) };
+  });
+  let headerMarkup = '';
+  await test('control-page-header-shows-the-same-drawing-as-the-icons', async () => {
+    const header = await page.evaluate(() => {
+      const icon = document.querySelector('.brand-icon'), box = icon.getBoundingClientRect();
+      return { width: box.width, height: box.height, markup: new XMLSerializer().serializeToString(icon.querySelector('svg')) };
+    });
+    assert.equal(header.width, 46); assert.equal(header.height, 46);
+    headerMarkup = header.markup;
+    const sameAsIcon = await comparison.evaluate(async ({ markup, png }) => window.iconDifference(await window.iconPixels('data:image/svg+xml;base64,' + btoa(markup), 128), await window.iconPixels(png, 128)), { markup: header.markup, png: fixtures[128] });
+    assert.ok(sameAsIcon.mean < 1 && sameAsIcon.max < 40, `Header icon differs from 128.png (mean ${sameAsIcon.mean}, max ${sameAsIcon.max})`);
+    report.header = { width: header.width, height: header.height, ...sameAsIcon };
+    return { size: `${header.width}x${header.height}`, meanDifference: sameAsIcon.mean };
+  });
   if (oldIcons) await test('native-size-light-dark-before-after-comparison', async () => {
-    const columns = [16, 20, 24, 32];
-    const row = (version, values, old = false) => `<div class="row"><div class="label">${version}</div>${columns.map(size => `<div class="cell"><img data-native-size="${size}" width="${size}" height="${size}" src="${values[old && (size === 20 || size === 24) ? 32 : size]}"></div>`).join('')}</div>`;
-    const panel = (title, dark) => `<section class="panel ${dark ? 'dark' : ''}"><h2>${title}</h2><div class="row headings"><span></span>${columns.map(size => `<span>${size}px</span>`).join('')}</div>${row('旧版 1.2.0', oldFixtures, true)}${row('新版 1.3', fixtures)}</section>`;
+    const columns = [16, 20, 24, 32], missingOld = columns.filter(size => !oldFixtures[size]);
+    const row = (version, values, old = false) => `<div class="row"><div class="label">${version}</div>${columns.map(size => `<div class="cell"><img data-native-size="${size}" width="${size}" height="${size}" src="${values[size] || values[32]}"></div>`).join('')}</div>`;
+    const panel = (title, dark) => `<section class="panel ${dark ? 'dark' : ''}"><h2>${title}</h2><div class="row headings"><span></span>${columns.map(size => `<span>${size}px</span>`).join('')}</div>${row(oldLabel, oldFixtures, true)}${row('新版 1.3', fixtures)}</section>`;
     await comparison.setContent(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
       *{box-sizing:border-box}body{margin:0;background:#f2f4f7;color:#273543;font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}.sheet{padding:30px 32px;width:1040px}h1{margin:0;font-size:25px;letter-spacing:-.4px}.intro{margin:7px 0 23px;color:#5e6c79;font-size:15px}.panels{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{padding:20px;border:1px solid #dce3e9;border-radius:14px;background:#fff}h2{font-size:16px;margin:0 0 14px}.dark{background:#292a2d;color:#edf1f4;border-color:#292a2d}.row{display:grid;grid-template-columns:108px repeat(4,1fr);align-items:center;min-height:57px;gap:6px}.headings{min-height:25px;color:#788591;font-size:13px}.dark .headings{color:#bdc7d0}.row>span,.cell{text-align:center}.cell{display:flex;align-items:center;justify-content:center;min-height:42px}.label{font-size:14px}.large{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:20px}.large-card{background:#fff;border:1px solid #dce3e9;border-radius:14px;padding:18px 20px}.large-title{margin:0 0 15px;font-size:16px;font-weight:600}.large-row{display:flex;align-items:center;justify-content:space-around;gap:18px}.sample{display:flex;flex-direction:column;align-items:center;gap:8px;color:#5c6c7b}.pixel{image-rendering:pixelated}.note{margin:18px 0 0;color:#626f7a;font-size:13px}.footer{margin-top:13px;border-top:1px solid #d9e2e9;padding-top:12px;color:#536474;font-size:13px}
-      </style></head><body><div class="sheet"><h1>WhiteWolf · 工具栏图标对照</h1><p class="intro">上排为旧版，下排为新版。浅色与深色背景均按实际像素显示。</p><div class="panels">${panel('浅色工具栏背景', false)}${panel('深色工具栏背景', true)}</div><div class="large"><section class="large-card"><p class="large-title">128px 原始资源</p><div class="large-row"><div class="sample"><img width="128" height="128" src="${oldFixtures[128]}"><span>旧版</span></div><div class="sample"><img width="128" height="128" src="${fixtures[128]}"><span>新版</span></div></div></section><section class="large-card"><p class="large-title">16px 像素结构 · 放大 8 倍</p><div class="large-row"><div class="sample"><img class="pixel" width="128" height="128" src="${oldFixtures[16]}"><span>旧版</span></div><div class="sample"><img class="pixel" width="128" height="128" src="${fixtures[16]}"><span>新版 · 简化细节</span></div></div></section></div><p class="note">旧版没有 20 / 24px 资源，此处从旧版 32px PNG 缩放作为对照；不代表 Chrome 在每台设备上的实际资源选择。新版各尺寸均使用对应 PNG。</p><p class="footer">仅图标补丁 · 六种尺寸 16 / 20 / 24 / 32 / 48 / 128px · 本机离线渲染 · 未使用用户浏览器资料</p></div></body></html>`);
+      </style></head><body><div class="sheet"><h1>WhiteWolf · 工具栏图标对照</h1><p class="intro">上排为旧版，下排为新版。浅色与深色背景均按实际像素显示。</p><div class="panels">${panel('浅色工具栏背景', false)}${panel('深色工具栏背景', true)}</div><div class="large"><section class="large-card"><p class="large-title">128px 原始资源</p><div class="large-row"><div class="sample"><img width="128" height="128" src="${oldFixtures[128]}"><span>旧版</span></div><div class="sample"><img width="128" height="128" src="${fixtures[128]}"><span>新版</span></div><div class="sample"><span style="display:block;width:46px;height:46px;border-radius:14px;box-shadow:0 6px 16px rgba(27,74,122,.28)">${headerMarkup}</span><span>控制窗口标题 46px</span></div></div></section><section class="large-card"><p class="large-title">16px 像素结构 · 放大 8 倍</p><div class="large-row"><div class="sample"><img class="pixel" width="128" height="128" src="${oldFixtures[16]}"><span>旧版</span></div><div class="sample"><img class="pixel" width="128" height="128" src="${fixtures[16]}"><span>新版 · 简化细节</span></div></div></section></div>${missingOld.length ? `<p class="note">旧版没有 ${missingOld.join(' / ')}px 资源，此处从旧版 32px PNG 缩放作为对照。</p>` : ''}<p class="note">Chrome 153 实测：100% 缩放时工具栏使用 16px，其余缩放使用 32px；扩展管理页使用 48px。</p><p class="footer">六种尺寸 16 / 20 / 24 / 32 / 48 / 128px · 本机离线渲染 · 未使用用户浏览器资料</p></div></body></html>`);
     await comparison.evaluate(() => Promise.all([...document.images].map(image => image.decode())));
     const displayed = await comparison.locator('[data-native-size]').evaluateAll(images => images.map(image => ({ expected: Number(image.dataset.nativeSize), width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height })));
     assert.equal(displayed.length, 16);
     for (const image of displayed) { assert.equal(image.width, image.expected); assert.equal(image.height, image.expected); }
     assert.equal(await comparison.evaluate(() => devicePixelRatio), 1);
     await comparison.screenshot({ path: path.join(output, 'icon-comparison.png'), fullPage: true });
-    report.screenshots.push('icon-comparison.png'); report.comparison = { backgrounds: ['#ffffff', '#292a2d'], nativeSizes: columns, devicePixelRatio: 1, oldMissingSizes: { 20: 'scaled from old 32px PNG', 24: 'scaled from old 32px PNG' } };
+    report.screenshots.push('icon-comparison.png'); report.comparison = { backgrounds: ['#ffffff', '#292a2d'], nativeSizes: columns, devicePixelRatio: 1, oldMissingSizes: Object.fromEntries(missingOld.map(size => [size, 'scaled from old 32px PNG'])) };
     return { nativeSizeImages: displayed.length, screenshot: 'icon-comparison.png' };
   });
   if (!oldIcons) { report.skipped = [{ name: 'native-size-light-dark-before-after-comparison', reason: 'Set OLD_ICON_DIR to historical icons to enable comparison.' }]; console.log('SKIP historical icon comparison: OLD_ICON_DIR is not set.'); }
@@ -149,7 +210,7 @@ try {
 finally {
   await context?.close();
   report.summary = { tests: report.tests.length, passed: report.tests.filter(item => item.passed).length, failed: report.tests.filter(item => !item.passed).length, pngs: report.pngs.length, externalRequests: report.httpRequests.length };
-  report.passed = !report.failure && report.tests.length === (oldIcons ? 6 : 5) && report.summary.failed === 0;
+  report.passed = !report.failure && report.tests.length === (oldIcons ? 9 : 8) && report.summary.failed === 0;
   await writeFile(path.join(output, 'icon-report.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({ ...report.summary, overallPassed: report.passed, report: 'qa/icon-1.3/icon-report.json' }, null, 2));
 }

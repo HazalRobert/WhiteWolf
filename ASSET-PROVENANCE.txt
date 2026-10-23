@@ -1,10 +1,10 @@
-WhiteWolf 1.2.2 visual asset provenance
+WhiteWolf 1.3 visual asset provenance
 
 Bundled mascot: public/themes/whitewolf-mascot.png
 Generated and refined with OpenAI image generation tools during development. The design direction was a broad-faced white wolf with a wink, two large front paws and natural fur texture, on a transparent background. The final edit used an earlier generated mascot and a user-supplied wolf photograph as visual references. The reference photograph and intermediate generations are not distributed in this repository. No assertion is made here about ownership of third-party reference material.
 
 Toolbar mark: public/icons/whitewolf.svg
-A project-authored vector mark, using a filled blue tile, white wolf silhouette and simplified small-size facial details. scripts/whitewolf-icons.mjs rasterizes it into Chrome PNG icons at 16, 20, 24, 32, 48 and 128 pixels. The in-page decorative vector is in src/ThemeArtwork.tsx. These icon resources were introduced in 1.2.1 and retained in 1.2.2.
+A project-authored vector mark: a blue gradient tile with a white geometric wolf outline. src/brand-mark.ts is the single drawing used by the control-page header and by scripts/whitewolf-icons.mjs, which writes whitewolf.svg and rasterizes the Chrome PNG icons at 16, 20, 24, 32, 48 and 128 pixels; the 16 pixel icon is a pixel-grid redraw of the same wolf. Versions 1.2.1 to 1.2.4 used a different mark (a filled blue tile and white wolf silhouette); 1.3 replaced it so that the toolbar icon matches the control page.
 
 Local custom themes
 User-selected theme images are not bundled. Image resizing, compression and crop suggestions occur in the user's browser without an image-generation service. This runtime feature is separate from development-time mascot creation.

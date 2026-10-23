@@ -306,7 +306,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
     <main className="app-shell" data-theme={skinMode} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <header className="app-header">
         <div className="brand">
-          <span className="brand-icon"><WolfMark /></span>
+          <WolfMark />
           <div className="brand-text"><strong dir="ltr">WhiteWolf</strong><span className="brand-caption">{themeT(language, 'brandDescriptor')}</span></div>
           <span className="free-badge">{tr('free')}</span>
         </div>

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CustomSkin } from './theme-store';
 import { computeCover } from './theme-image';
+import { brandIconSvg } from './brand-mark';
+
+// Static markup from brand-mark.ts, the same drawing as the extension icons.
+const brandIcon = { __html: brandIconSvg(46, 'large', 'ww-brand') };
 
 export function WolfMark() {
-  return <svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M9 6 20 15h8L39 6l-2 23-13 13L11 29 9 6Z" fill="currentColor"/><path d="m13 13 3 12 8 11 8-11 3-12-9 9h-4l-9-9Z" fill="var(--logo-face, #fff)"/><path d="m14 25 6 2m14-2-6 2" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/><path d="m21 31 3 3 3-3h-6Z" fill="currentColor"/></svg>;
+  return <span className="brand-icon" aria-hidden="true" dangerouslySetInnerHTML={brandIcon} />;
 }
 
 export function ThemeArtwork({ mode, skin }: { mode: 'minimal'|'wolf'|'custom'; skin?: CustomSkin }) {

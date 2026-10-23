@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 32 32">
-<rect x=".5" y=".5" width="31" height="31" rx="7" fill="#1468df"/>
-<path d="M5 4 12 8.5Q16 7 20 8.5L27 4 26 15.5 28 19 24.5 20.5 24 24 16 29 8 24 7.5 20.5 4 19 6 15.5Z" fill="#fff"/>
-<path d="m7.5 8 3.8 3-3.5 2ZM24.5 8l-3.8 3 3.5 2Z" fill="#153451"/>
-<path d="M8 13.5 16 18l8-4.5-3 9L16 27l-5-4.5Z" fill="#e3effb"/>
-<path d="m8 15 6 1.5-1.5 2-3-1ZM24 15l-6 1.5 1.5 2 3-1Z" fill="#153451"/>
-<path d="M12.7 22Q16 20.5 19.3 22L16 25.5Z" fill="#153451"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="ww-tile" gradientUnits="userSpaceOnUse" x1="12.874" y1="-9.015" x2="115.126" y2="137.015"><stop offset="0" stop-color="#3b8ac6"/><stop offset=".55" stop-color="#1f5f8f"/><stop offset="1" stop-color="#1b3f73"/></linearGradient><linearGradient id="ww-sheen" gradientUnits="userSpaceOnUse" x1="0" y1="2.783" x2="0" y2="59.103"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect width="128" height="128" rx="38.957" fill="url(#ww-tile)"/><rect x="2.783" y="2.783" width="122.435" height="122.435" rx="36.174" fill="url(#ww-sheen)"/><path d="M0 41.739V38.957A38.957 38.957 0 0 1 38.957 0H89.043A38.957 38.957 0 0 1 128 38.957V41.739A38.957 38.957 0 0 0 89.043 2.783H38.957A38.957 38.957 0 0 0 0 41.739Z" fill="#fff" fill-opacity=".28"/><g transform="translate(64 64) scale(2.533) translate(-24 -24)"><path d="M9 6 20 15h8L39 6l-2 23-13 13L11 29 9 6Z" fill="#fff"/><path d="m13 13 3 12 8 11 8-11 3-12-9 9h-4l-9-9Z" fill="#2a6ea2"/><path d="m14 25 6 2m14-2-6 2" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><path d="m21 31 3 3 3-3h-6Z" fill="#fff"/></g></svg>

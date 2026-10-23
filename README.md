@@ -70,7 +70,7 @@ node tests/theme-image-browser.mjs
 
 `dev` serves a local demonstration with synthetic data. Browser checks use isolated profiles and synthetic fixtures; they do not validate a real user's X account. `test:browser` and `test:design` build the extension first. Other browser scripts require an existing `dist` build. They use Playwright's installed Chromium unless `BROWSER_EXECUTABLE` is set to a compatible executable path. Test output and profiles are ignored by Git.
 
-`node scripts/icon-check.mjs` checks the current icons and isolated extension. Its optional historical visual comparison requires `OLD_ICON_DIR` pointing to a directory containing historical `16.png`, `32.png` and `128.png`; otherwise that comparison is explicitly skipped. Historical parser/pagination comparison scripts require the previous source/build and a separately downloaded pinned public fixture, as explained in [the technical notes](docs/technical-review-history.txt). They are not part of the standard unit-test command.
+`node scripts/whitewolf-icons.mjs` regenerates `public/icons` from `src/brand-mark.ts`, the drawing the control-page header also uses. `node scripts/icon-check.mjs` checks the current icons and isolated extension, and fails when the PNGs no longer match that drawing. Its optional historical visual comparison requires `OLD_ICON_DIR` pointing to a directory containing historical `16.png`, `32.png` and `128.png`; otherwise that comparison is explicitly skipped. Historical parser/pagination comparison scripts require the previous source/build and a separately downloaded pinned public fixture, as explained in [the technical notes](docs/technical-review-history.txt). They are not part of the standard unit-test command.
 
 The 1.2.4 release's automated checks used synthetic account data. This publication does not claim a new live-account scan, follow or unfollow test. X's web client is an external dependency and can change; an unavailable client or changed response schema can stop the extension.
 
@@ -134,7 +134,7 @@ WhiteWolf 是一款免费、开源的 Chrome 扩展，用于查看你在 X 上�
 
 已有解压安装应保留原加载路径及扩展身份，替换构建后关闭旧控制页面，在扩展管理页重新加载并确认版本 1.2.4。另行加载目录或以后从商店安装，可能产生不同扩展身份及独立存储。
 
-`npx pnpm dev` 启动本地合成数据演示。浏览器验证需先运行 `npx playwright install chromium`；具体命令见英文部分。可通过 `BROWSER_EXECUTABLE` 指定兼容浏览器。历史图标对比需显式提供 `OLD_ICON_DIR`，未提供时会明确跳过该项。旧版解析器与分页对比还需要历史源码/构建及单独下载的固定公开样本，并非普通单元测试的前置条件。
+`npx pnpm dev` 启动本地合成数据演示。浏览器验证需先运行 `npx playwright install chromium`；具体命令见英文部分。可通过 `BROWSER_EXECUTABLE` 指定兼容浏览器。`node scripts/whitewolf-icons.mjs` 会根据 `src/brand-mark.ts`（控制窗口标题使用的同一图形）重新生成 `public/icons`；图标检查在 PNG 与该图形不一致时失败。历史图标对比需显式提供 `OLD_ICON_DIR`，未提供时会明确跳过该项。旧版解析器与分页对比还需要历史源码/构建及单独下载的固定公开样本，并非普通单元测试的前置条件。
 
 本次发布的自动化检查使用隔离浏览器和合成账号数据，没有执行用户真实账号的扫描、关注或取消关注验收。X 网页客户端可能变化，客户端不可用或数据结构改变时扩展会停止。
 
