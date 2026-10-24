@@ -1,6 +1,6 @@
-# WhiteWolf 1.3 — Unreleased internal test build
+# WhiteWolf 1.3 — 2026-10-24
 
-Status: **not published.** This entry describes the source on the development branch for the maintainer's own acceptance testing. The public download and README remain at 1.2.4 until 1.3 is approved. Manifest version `1.3`; package version `1.3.0`.
+Released for Windows and Mac Chrome. `downloads/WhiteWolf-1.3-Windows-Chrome.zip` and `downloads/WhiteWolf-1.3-Mac-Chrome.zip` contain the same extension files and differ only in the included installation guide. Manifest version `1.3`; package version `1.3.0`.
 
 ## Stability
 
@@ -18,7 +18,7 @@ Status: **not published.** This entry describes the source on the development br
 
 - Redesigned interface built on design tokens: refined typography and spacing, an overview with integrated scan status, stat tiles with a non-follower ratio ring, a progress meter, skeleton loading rows, a segmented mode control, refined list rows, dialogs and theme editor.
 - Follows the system dark mode. Light and dark palettes were checked at 4.5:1 or higher for all measured text roles. Animations respect reduced-motion settings.
-- Scan progress is estimated from the account's following count (display only; never used for decisions). Automatic runs show processed/total and a countdown to the next account.
+- While Following pages are read, the scan meter shows an estimate only when X's Viewer response includes the account's following count (display only; never used for decisions). Otherwise it shows the pages read and accounts checked, with no bar and no animation. Relationship verification shows a determinate progress bar. Automatic runs show processed/total and a countdown to the next account.
 - Avatars use a larger rendition of the same X profile image, falling back to the URL X supplied.
 - CSV file names include the username and scan time. "/" focuses search; arrow keys switch between manual and automatic mode.
 - The rate-limit message and the uncertain-outcome help text were updated in all ten languages; 15 new interface strings were added in all ten languages.
@@ -34,10 +34,10 @@ Status: **not published.** This entry describes the source on the development br
 - Design check: 80 light and 60 dark layouts (ten languages, 360–1100 px, both modes). Minimum measured text contrast is 5.16:1 in light mode and 5.33:1 in dark mode across 22 text roles. Themed layouts: 160 (white wolf and custom image).
 - Isolated MV3 browser suites with the real worker, the page adapter and synthetic X responses:
   - 8 new 1.3 scenarios: in-app navigation during a scan, reload and resume, rate-limit reset time and resume, pacing input, automatic progress, unknown whitelist handle, and an uncertain recheck.
-  - Existing suites: smoke (51 checks), pause/resume (11 scenarios), unavailable entries (7), theme storage (55 checks), theme in the extension, React root discovery, worker lifecycle (65 s idle and a forced worker stop), icons (9: PNGs identical to the shared drawing, mark proportion and centring, header identical to the 128 px icon, before/after sheet) and theme images.
-- The new toolbar icon was also checked in a headed Chromium 153 window (Linux, virtual display) at 100%, 125%, 150% and 200% scaling with light and dark browser themes. Windows Chrome was not checked.
+  - Existing suites: smoke (51 checks), pause/resume (11 scenarios, now also asserting that reading without a following count shows no bar or animation and that verification keeps its progress bar; the first assertion fails on the earlier build), unavailable entries (7), theme storage (55 checks), theme in the extension, React root discovery, worker lifecycle (65 s idle and a forced worker stop), icons (9: PNGs identical to the shared drawing, mark proportion and centring, header identical to the 128 px icon, before/after sheet) and theme images.
+- The new toolbar icon was also checked in a headed Chromium 153 window (Linux, virtual display) at 100%, 125%, 150% and 200% scaling with light and dark browser themes. Automated toolbar checks ran on Linux only.
 - An independent review of the change set found no breach of the write-safety invariants. Its findings on toolbar binding, writes during navigation, and automatic eligibility after a recheck were fixed before this entry.
-- No real X account, cookie or request was involved. Live-account scanning, unfollowing and X's real rate-limit headers are not verified. The historical parser and pagination comparisons were not run; they need the previous build and a separately downloaded fixture.
+- The automated checks used no real X account, cookie or request. Before publication the maintainer tested 1.3 with a live account in Windows and Mac Chrome. In that test X's Viewer response did not include the following count, which is why reading without a count no longer animates the bar. Live unfollow requests and X's real rate-limit headers are not covered by the automated checks. The historical parser and pagination comparisons were not run; they need the previous build and a separately downloaded fixture.
 
 ## Known limitations
 
@@ -46,7 +46,7 @@ Status: **not published.** This entry describes the source on the development br
 
 ## 中文说明
 
-**状态：未发布。**本条目说明开发分支上的源码，仅供维护者自行验收测试。在 1.3 通过验收前，公开下载与 README 仍为 1.2.4。清单版本 `1.3`，package 版本 `1.3.0`。
+**状态：已发布（2026-10-24）。**同时提供 Windows 与 Mac 版 Chrome 安装包：`downloads/WhiteWolf-1.3-Windows-Chrome.zip` 与 `downloads/WhiteWolf-1.3-Mac-Chrome.zip` 中的扩展文件完全相同，只有附带的安装说明不同。清单版本 `1.3`，package 版本 `1.3.0`。
 
 稳定性：
 
@@ -60,11 +60,11 @@ Status: **not published.** This entry describes the source on the development br
 - **操作间隔与批次数量可正常输入：**合法数值即时生效，其余在回车或失焦时校正。1.2.4 每输入一个字符就立即校正，输入“30”会得到 50。
 - 白名单查询进行中时，其他操作会被禁用，而不是被引擎静默忽略。
 
-界面：全新设计令牌体系与排版、集成扫描状态的概览区、带未回关占比环的统计卡、进度条、骨架加载、分段模式切换、列表行、对话框与外观编辑器；跟随系统深色模式，浅色与深色配色的所有测量文字对比度均不低于 4.5:1；尊重“减少动态效果”设置。按账号关注总数估算扫描进度（仅用于显示），自动处理显示进度与下一个账号倒计时。头像优先加载同一图片的较大尺寸版本，失败时回退到 X 提供的原地址。CSV 文件名包含用户名与扫描时间；按“/”聚焦搜索，方向键切换手动/自动模式。十种语言同步更新限流与“结果不确定”说明，并新增 15 条界面文案。扩展图标改为与控制窗口标题一致：工具栏、扩展管理页和控制窗口标签页图标使用同一渐变底板与狼头标志，统一由 `src/brand-mark.ts` 绘制、`scripts/whitewolf-icons.mjs` 生成；狼头在标题与 48、128 像素图标中占底板高度 71%（此前标题为 49%），工具栏尺寸为 75%，16 像素图标按像素网格重绘。Chrome 153 实测：100% 缩放时工具栏使用 `16.png`，其余缩放使用 `32.png`；扩展管理页使用 `48.png`。
+界面：全新设计令牌体系与排版、集成扫描状态的概览区、带未回关占比环的统计卡、进度条、骨架加载、分段模式切换、列表行、对话框与外观编辑器；跟随系统深色模式，浅色与深色配色的所有测量文字对比度均不低于 4.5:1；尊重“减少动态效果”设置。读取关注列表时，仅当 X 的 Viewer 响应包含关注总数才显示估算进度（仅用于显示），否则只显示已读取页数与已检查账号数，不显示进度条或动画；核验关系阶段显示确定的进度条；自动处理显示进度与下一个账号倒计时。头像优先加载同一图片的较大尺寸版本，失败时回退到 X 提供的原地址。CSV 文件名包含用户名与扫描时间；按“/”聚焦搜索，方向键切换手动/自动模式。十种语言同步更新限流与“结果不确定”说明，并新增 15 条界面文案。扩展图标改为与控制窗口标题一致：工具栏、扩展管理页和控制窗口标签页图标使用同一渐变底板与狼头标志，统一由 `src/brand-mark.ts` 绘制、`scripts/whitewolf-icons.mjs` 生成；狼头在标题与 48、128 像素图标中占底板高度 71%（此前标题为 49%），工具栏尺寸为 75%，16 像素图标按像素网格重绘。Chrome 153 实测：100% 缩放时工具栏使用 `16.png`，其余缩放使用 `32.png`；扩展管理页使用 `48.png`。
 
 未改变：权限、本地存储键与格式、X 请求类型，以及每次写入前的身份与关系实时核验、一次性写入凭证和写后回读。
 
-验证范围：376 项单元测试（1.2.4 为 302 项）、类型检查与生产构建通过；浅色 80 种、深色 60 种布局（十种语言、360–1100 像素、两种模式），实测文字对比度最低为浅色 5.16:1、深色 5.33:1；白狼与自定义皮肤共 160 种布局。在隔离 MV3 浏览器中以真实后台、页面适配器和合成 X 响应，通过 8 项 1.3 新场景，以及原有冒烟（51 项）、暂停继续（11 项）、不可用条目（7 项）、皮肤存储（55 项）、扩展内皮肤、React 根节点识别、后台生命周期（65 秒空闲与强制停止）、图标（9 项：PNG 与统一源逐像素一致、标志比例与居中、标题图标与 128 像素图标一致、新旧对照）和皮肤图片测试；另在 Linux 有界面 Chromium 153 中检查了 100%、125%、150%、200% 缩放与浅色、深色主题下的工具栏图标，未在 Windows Chrome 上检查。独立复核未发现写入安全约束被破坏，其提出的工具栏绑定、跳转期间写入、重新核实后自动处理资格三项问题已在本条目前修复。未接触任何真实 X 账号；真实账号扫描、取关及 X 实际限流响应头尚未验证。历史解析器与分页对比脚本需要旧版构建和单独下载的样本，未运行。
+验证范围：376 项单元测试（1.2.4 为 302 项）、类型检查与生产构建通过；浅色 80 种、深色 60 种布局（十种语言、360–1100 像素、两种模式），实测文字对比度最低为浅色 5.16:1、深色 5.33:1；白狼与自定义皮肤共 160 种布局。在隔离 MV3 浏览器中以真实后台、页面适配器和合成 X 响应，通过 8 项 1.3 新场景，以及原有冒烟（51 项）、暂停继续（11 项，新增断言：无关注总数的读取阶段不显示进度条和动画、核验阶段保留进度条；前者在旧构建上会失败）、不可用条目（7 项）、皮肤存储（55 项）、扩展内皮肤、React 根节点识别、后台生命周期（65 秒空闲与强制停止）、图标（9 项：PNG 与统一源逐像素一致、标志比例与居中、标题图标与 128 像素图标一致、新旧对照）和皮肤图片测试；另在 Linux 有界面 Chromium 153 中检查了 100%、125%、150%、200% 缩放与浅色、深色主题下的工具栏图标，工具栏的自动检查只在 Linux 上运行。独立复核未发现写入安全约束被破坏，其提出的工具栏绑定、跳转期间写入、重新核实后自动处理资格三项问题已在本条目前修复。自动化检查未接触任何真实 X 账号；发布前维护者在 Windows 与 Mac 版 Chrome 上用真实账号测试了 1.3，测试中 X 的 Viewer 响应未包含关注总数，因此读取阶段改为只显示计数、进度条不再滚动。真实取关请求和 X 实际限流响应头不在自动化检查范围内。历史解析器与分页对比脚本需要旧版构建和单独下载的样本，未运行。
 
 已知限制：X 标签页跳转尚未稳定时，权限失败可能被提示为页面跳转，两者都会断开会话并保留已读取的扫描页面。会话结束时仍在等待跳转稳定的写入，控制页面会像 1.2.4 一样保守地标为“结果不确定”（实际未发送），可用“重新核实”一次读取解除。
 

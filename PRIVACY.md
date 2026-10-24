@@ -1,6 +1,6 @@
 # WhiteWolf Privacy Policy / 隐私政策
 
-Effective date / 生效日期: 2026-10-23  
+Effective date / 生效日期: 2026-10-24  
 Applies to / 适用版本: WhiteWolf 1.3  
 Maintainer / 维护者: [HazalRobert](https://github.com/HazalRobert)  
 Contact / 联系: [WhiteWolf GitHub Issues](https://github.com/HazalRobert/WhiteWolf/issues)
