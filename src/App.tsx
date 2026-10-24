@@ -79,10 +79,9 @@ function Avatar({ row, label }: { row: Row; label: string }) {
   </a>;
 }
 
-function ProgressTrack({ value, label }: { value: number | null; label: string }) {
-  return <div className={`progress-track ${value === null ? 'is-indeterminate' : ''}`} role="progressbar" aria-label={label}
-    aria-valuemin={0} aria-valuemax={100} aria-valuenow={value ?? undefined}>
-    <span style={value === null ? undefined : { width: `${value}%` }} />
+function ProgressTrack({ value, label }: { value: number; label: string }) {
+  return <div className="progress-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
+    <span style={{ width: `${value}%` }} />
   </div>;
 }
 
@@ -357,7 +356,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
         </div>
         {showProgress && <div className="scan-meter" data-state={scanActive ? 'active' : 'paused'}>
           <div className="scan-meter-head"><span>{tr(verifying ? 'scanPhaseVerifying' : 'scanPhaseReading')}</span><span dir="auto">{progressText}</span></div>
-          <ProgressTrack value={progressValue} label={tr(verifying ? 'scanPhaseVerifying' : 'scanPhaseReading')} />
+          {progressValue !== null && <ProgressTrack value={progressValue} label={tr(verifying ? 'scanPhaseVerifying' : 'scanPhaseReading')} />}
           {scanActive && connection && <p className="scan-tip">{tr('scanTip')}</p>}
         </div>}
         <div className="stats-grid">
@@ -407,7 +406,7 @@ export default function App({ state, actions, connection }: { state: AppState; a
             <div className="auto-control"><div className={`auto-readiness ${canStart || running ? 'ready' : ''}`}><span />{tr(canStart || running ? 'autoReady' : 'autoBlocked')}<small>{tr('selectedCount', { count: previewCount })}</small></div>
               {runProgress && runProgress.total > 0 && <div className="run-progress" role="status">
                 <div className="run-progress-head"><span>{tr('runProgress', { done: runProgress.processed, total: runProgress.total })}</span>{nextAt && secondsLeft > 0 && <span className="run-next"><Clock3 size={14} />{tr('nextIn', { seconds: secondsLeft })}</span>}</div>
-                <ProgressTrack value={percent(runProgress.processed, runProgress.total)} label={tr('runProgress', { done: runProgress.processed, total: runProgress.total })} />
+                <ProgressTrack value={percent(runProgress.processed, runProgress.total) ?? 0} label={tr('runProgress', { done: runProgress.processed, total: runProgress.total })} />
               </div>}
               {autoActive ? <button className="button button-dark button-pause" onClick={() => actions.pause()} disabled={pausing}>{pausing ? <LoaderCircle size={15} className="spin" /> : <Pause size={15} />}{tr(pausing ? 'pausing' : 'pauseAuto')}</button> : <button className="button button-primary" disabled={!canStart} onClick={() => setConfirmation({ type: 'auto' })}><Play size={14} fill="currentColor" />{tr(state.phase === 'paused' && !scanPaused ? 'resume' : 'previewAuto')}</button>}
             </div>

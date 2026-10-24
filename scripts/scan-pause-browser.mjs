@@ -58,6 +58,11 @@ const resetScenario = (label, large = false) => {
   fixture.following.clear();
   for (const person of scenario.people) fixture.following.add(person.id);
 };
+// Progress bar inside the scan meter and every CSS animation running inside it.
+const meter = () => ui.evaluate(() => ({
+  tracks: [...document.querySelectorAll('.scan-meter .progress-track')].map(track => track.getAttribute('aria-valuenow')),
+  animations: document.getAnimations().filter(animation => animation.effect?.target?.closest?.('.scan-meter')).map(animation => animation.animationName),
+}));
 const makeGate = match => {
   assert.equal(networkGate, null, 'Only one synthetic network gate may be armed.');
   let release;
@@ -266,6 +271,8 @@ try {
       const gate = makeGate(entry => entry.operation === 'Following' && entry.variables.cursor === cursorAt(1));
       await startScan(); await until(() => gate.reached, 'Second page was not requested.');
       assert.equal((await snapshot()).pages, 1); assert.equal((await snapshot()).total, 2);
+      // X reported no following count, so the reading phase has no bar and nothing moving in the meter.
+      assert.deepEqual(await meter(), { tracks: [], animations: [] });
       await layout(theme, mode, 'scanning');
       const paused = await pauseHeld(gate); const quiet = await assertQuiet(`${theme}/${mode}`);
       await layout(theme, mode, 'paused');
@@ -314,6 +321,8 @@ try {
     await startScan();
     await until(() => worker.evaluate(() => globalThis.__pauseBrowserFixture.held), 'Second relation batch was not reached.', 20000);
     const before = await snapshot(); assert.equal(before.total, 102); assert.equal(before.checked, 100); assert.equal(before.pages, 6);
+    // Verification keeps its determinate blue bar and sheen.
+    assert.deepEqual(await meter(), { tracks: ['98'], animations: ['sheen'] });
     await ui.getByTestId('scan-pause').click();
     await worker.evaluate(() => { const state = globalThis.__pauseBrowserFixture; state.holdRelationNumber = null; state.release?.(); });
     await waitPaused(); await sleep(150); const paused = await snapshot();
